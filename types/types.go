@@ -49,6 +49,8 @@ type ScreenerResult struct {
 }
 
 type NewsAnalysis struct {
+	// ETFCode 关联的 ETF 代码，便于在批量分析（NewsList）中按代码匹配。
+	ETFCode   string   `json:"etf_code,omitempty"`
 	Sector    string   `json:"sector"`
 	Sentiment string   `json:"sentiment"`
 	Score     float64  `json:"score"`
@@ -100,6 +102,21 @@ type FinalDecision struct {
 	GeneratedAt    time.Time            `json:"generated_at"`
 	// 加权分数明细
 	ScoreBreakdown map[string]float64 `json:"score_breakdown"`
+	// Picks 投委会精选 1~2 支推荐买入标的（来自 Top5）。
+	Picks []FinalPick `json:"picks,omitempty"`
+}
+
+// FinalPick 投委会精选标的，对应 FinalDecision.Picks 数组中的一项。
+type FinalPick struct {
+	ETFCode        string  `json:"etf_code"`
+	ETFName        string  `json:"etf_name"`
+	Sector         string  `json:"sector"`
+	Recommendation string  `json:"recommendation"`
+	Conviction     float64 `json:"conviction"`
+	EntryPrice     float64 `json:"entry_price"`
+	StopLoss       float64 `json:"stop_loss"`
+	TakeProfit     float64 `json:"take_profit"`
+	Rationale      string  `json:"rationale"`
 }
 
 type AgentState struct {
@@ -110,11 +127,36 @@ type AgentState struct {
 	Regime    *RegimeAnalysis       `json:"regime,omitempty"`
 	MoneyFlow *MoneyFlowAnalysis    `json:"money_flow,omitempty"`
 	Final     *FinalDecision        `json:"final,omitempty"`
+	// NewsList 对 Top5 的逐只批量消息面分析。
+	NewsList []NewsAnalysis `json:"news_list,omitempty"`
+	// TechList 对 Top5 的逐只批量技术面分析。
+	TechList []TechnicalAnalysis `json:"tech_list,omitempty"`
+	// Memory 由 MemoryAgent 预生成的长期记忆备忘。
+	Memory *MemorySummary `json:"memory,omitempty"`
 	// CurrentHold 用户当前持仓 ETF 代码，可选；为空时报告中跳过"持仓对照"章节。
 	// 仅本次会话使用，系统不做任何本地持久化。
 	CurrentHold string `json:"current_hold,omitempty"`
 	// HoldAdvice 在 CurrentHold 非空时由 BuildHoldAdvice 计算，包含命中情况与建议。
 	HoldAdvice *HoldAdvice `json:"hold_advice,omitempty"`
+}
+
+// MemorySummary 由 MemoryAgent 输出，注入 FinalAgent 的长期记忆备忘。
+type MemorySummary struct {
+	Summary  string        `json:"summary"`
+	Patterns []string      `json:"patterns,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
+	Memos    []HistoryMemo `json:"memos,omitempty"`
+}
+
+// HistoryMemo 单份历史报告压缩后的关键纪要。
+type HistoryMemo struct {
+	Date           string  `json:"date"`
+	TargetCode     string  `json:"target_code"`
+	TargetName     string  `json:"target_name"`
+	Sector         string  `json:"sector"`
+	OverallScore   float64 `json:"overall_score"`
+	Recommendation string  `json:"recommendation"`
+	ReasoningGist  string  `json:"reasoning_gist"`
 }
 
 // RegimeAnalysis 由 RegimeAgent 输出，用作 FinalAgent 的"宏观环境硬性过滤"。
