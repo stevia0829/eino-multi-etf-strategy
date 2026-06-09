@@ -73,7 +73,7 @@ func TestRotation_DefaultParams(t *testing.T) {
 	if p.MDays != 21 {
 		t.Fatalf("MDays should be 21, got %v", p.MDays)
 	}
-	if p.MaxScore != 6 || p.MinScore != -1 {
+	if p.MaxScore != 6 || p.MinScore != 0 {
 		t.Fatalf("default thresholds wrong: %+v", p)
 	}
 	if p.ScoreThresholdMultiplier != 1.1 {

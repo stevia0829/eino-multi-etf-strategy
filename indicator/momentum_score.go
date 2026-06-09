@@ -13,8 +13,14 @@ import (
 //  1. 取最近 m_days 个收盘价 prices；
 //  2. 对 log(prices) 做加权一次多项式回归 (权重 np.linspace(1, 2, n))，得到 slope；
 //  3. 年化收益率 annualized = exp(slope * 250) - 1；
-//  4. 加权 R²：1 - SSE_w / SST_w；
+//  4. 加权 R²：1 - SSE_w / SST_w，其中：
+//     SSE_w = Σ wᵢ (yᵢ - ŷᵢ)²
+//     SST_w = Σ wᵢ (yᵢ - ȳ)²        ← ȳ 用「未加权」算术均值（对齐聚宽 np.mean(y)）
 //  5. score = annualized * R²。
+//
+// 与聚宽 get_etf_rank / moment_rank 的口径已对齐：
+//   - SST_w 中的 ȳ 使用 Σy/n（未加权均值），与 numpy 的 np.mean(y) 一致
+//   - R² 不做 0~1 的 clamp，允许负值（震荡序列时 score 会被进一步压低，排名更靠后）
 //
 // 返回 (score, annualizedReturn, r2)；样本不足时三者均为 0。
 func MomentumScore(klines []types.KLine, mDays int) (score, annualized, r2 float64) {
@@ -65,26 +71,26 @@ func MomentumScore(klines []types.KLine, mDays int) (score, annualized, r2 float
 
 	annualized = math.Exp(slope*250) - 1
 
-	// 加权 R²
-	yMean := sumWY / sumW
+	// 加权 R²：SST_w 中的 ȳ 使用「未加权」均值（对齐聚宽 np.mean(y)）
+	var sumY float64
+	for i := 0; i < mDays; i++ {
+		sumY += closes[i]
+	}
+	yMeanUnweighted := sumY / float64(mDays)
+
 	var sseW, sstW float64
 	for i := 0; i < mDays; i++ {
 		x := float64(i)
 		y := closes[i]
 		yhat := slope*x + intercept
 		sseW += w[i] * (y - yhat) * (y - yhat)
-		sstW += w[i] * (y - yMean) * (y - yMean)
+		sstW += w[i] * (y - yMeanUnweighted) * (y - yMeanUnweighted)
 	}
 	if sstW == 0 {
 		r2 = 0
 	} else {
+		// 不再 clamp 到 [0,1]：保持与聚宽一致，允许负 R² 把弱拟合标的的 score 推得更低
 		r2 = 1 - sseW/sstW
-		if r2 < 0 {
-			r2 = 0
-		}
-		if r2 > 1 {
-			r2 = 1
-		}
 	}
 
 	score = annualized * r2

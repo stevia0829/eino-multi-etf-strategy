@@ -62,6 +62,14 @@ func (a *RegimeAgent) Run(ctx context.Context) (*types.RegimeAnalysis, error) {
 }
 
 // classifyRegime 输出 (trend, score, positionCap)。
+//
+// PositionCap 设计原则（已对齐聚宽实战 + 保留风控旁路）：
+//   - bull / neutral_up / neutral：保持高仓位（1.0/0.95/0.85），让动量信号充分发挥；
+//   - bear：降仓 0.4，但仍允许部分动量反弹机会；
+//   - risk_off：仅在 MA120 跌破 + 60 日回撤 ≥ 8% 这类系统性风险时强制空仓。
+//
+// 旧版本（0.5/0.7/1.0）对 bull 没问题，但 neutral/neutral_up 机械打 50%/70% 折扣，
+// 在 A 股波段上经常把上涨初期识别成 neutral_up，损失明显。
 func classifyRegime(price, ma20, ma60, ma120, dd float64) (string, float64, float64) {
 	// risk_off：价格跌破 MA120 且 60 日回撤 ≥ 8%
 	if ma120 > 0 && price < ma120 && dd >= 0.08 {
@@ -70,7 +78,7 @@ func classifyRegime(price, ma20, ma60, ma120, dd float64) (string, float64, floa
 	}
 	// bear：价格跌破 MA60 且 MA60 < MA120（中期下降）
 	if ma60 > 0 && ma120 > 0 && price < ma60 && ma60 < ma120 {
-		return "bear", 35, 0.2
+		return "bear", 35, 0.4
 	}
 	// bull：价格 > MA20 > MA60 > MA120（多头排列）
 	if ma20 > 0 && ma60 > 0 && ma120 > 0 && price > ma20 && ma20 > ma60 && ma60 > ma120 {
@@ -78,10 +86,10 @@ func classifyRegime(price, ma20, ma60, ma120, dd float64) (string, float64, floa
 	}
 	// neutral_up：价格 > MA60 但未形成完整多头排列
 	if ma60 > 0 && price > ma60 {
-		return "neutral_up", 65, 0.7
+		return "neutral_up", 65, 0.95
 	}
 	// neutral：其他
-	return "neutral", 50, 0.5
+	return "neutral", 50, 0.85
 }
 
 func composeRegimeSummary(r *types.RegimeAnalysis) string {

@@ -40,9 +40,10 @@ go run . [flags]
 | `--skip-report` | `false` | 仅打印结果，不落地 Markdown |
 | `--bt-start` | 一年前 | 回测起始日（仅 backtest 模式） |
 | `--bt-end` | `--date` 或今天 | 回测结束日 |
-| `--bt-step` | `5` | 采样间隔（交易日） |
-| `--bt-hold` | `5` | 持有期（交易日） |
-| `--bt-max` | `60` | 最大样本数 |
+| `--bt-step` | `5` | 采样间隔（**状态化模式下已忽略**，保留兼容） |
+| `--bt-hold` | `5` | 持有期（**状态化模式下已忽略**，由信号反转决定） |
+| `--bt-max` | `60` | 最大样本数；`0` = 不限。**状态化模式下表示截尾交易日数** |
+| `--bt-variant` | `both` | 回测变体：`v3`（多 Agent 主流程） / `v3v2`（叠加 V2 4 闸门） / `both`（A/B 对比） / `joinquant`（裸聚宽对照） |
 
 ### 4. 常用命令示例
 
@@ -143,17 +144,19 @@ go test ./...         # 单元测试（含 momentum_score / rotation / writer / 
 | 顺周期/宽基 | 0.30 | 0.25 | 0.05 | 0.05 | 0.20 | 0.15 |
 | 贵金属/债券 | 0.25 | 0.20 | 0.05 | 0.20 | 0.20 | 0.10 |
 
-**Recommendation 映射**：
-- ≥ 80 → `strong_buy`
-- ≥ 65 → `buy`
-- ≥ 50 → `hold`
-- < 50 → `avoid`
+**Recommendation 映射**（综合分阈值，已对齐聚宽口径，见 `agent/final.go:ruleRecommend`）：
+- ≥ 70 → `strong_buy`
+- ≥ 40 → `buy`     （归一化分数对应底层动量分 score > 0）
+- ≥ 25 → `hold`
+- < 25 → `avoid`
+
+> 旧阈值 80/65/50 会让"动量弱正向 + 多因子中性"的标的被映射成 hold，在状态化每日回测里 = 平仓 → 频繁空仓。新阈值让动量正向标的稳定进 buy，对齐聚宽"rank[0] 直接持有"语义。
 
 **反向约束**：
-- `regime.trend == "risk_off"` → 强制 `avoid`（达利欧派一票否决）
+- `regime.trend == "risk_off"` → 强制 `avoid`（达利欧派一票否决，硬约束保留）
 - `regime.trend == "bear"` → 降一档（`strong_buy / buy → hold`）
-- `target.premium_pct ≥ +3%` → `strong_buy/buy` 强制降为 `hold`（巴菲特派一票否决追高）
-- `position_cap` 必须 ≤ regime 给的上限
+- `target.premium_pct ≥ +3%` → `strong_buy/buy` 强制降为 `hold`（巴菲特派一票否决追高，仅实时模式生效）
+- `position_cap` 必须 ≤ regime 给的上限（详见 [docs/CHANGELOG-strategy.md](docs/CHANGELOG-strategy.md) 中"P0 ④ Regime PositionCap"）
 
 ### 2.4 长期记忆（MemoryAgent）
 
@@ -197,14 +200,15 @@ NewsAgent 与 TechnicalAgent 已扩展为对 Top5 进行批量分析，FinalAgen
 
 实现：[indicator/momentum_score.go](indicator/momentum_score.go)。
 
-### 3.2 过滤参数
+### 3.2 过滤参数（已对齐聚宽口径）
 
 | 参数 | 值 | 含义 |
 |---|---|---|
 | `m_days` | 21 | 动量参考天数 |
 | `max_score` | 6 | 过热阈值，超过需要日间 1.1× 加速门槛 |
-| `min_score` | -1 | 下限（用于多 Agent 软评分模式，允许负分反转入场） |
+| `min_score` | **0** | 下限。**已从 -1 调整为 0**，对齐聚宽 `g.min_score=0`，剔除负分动量 |
 | `score_threshold_multiplier` | 1.1 | 过热标的的日间增长门槛 |
+| `dedup_by_sector` | **false** | **板块去重默认关闭**，对齐聚宽（不去重）；可显式 `Screener.DedupBySector=true` 开启 |
 
 ### 3.3 Action 五态语义
 
@@ -315,18 +319,44 @@ eino-muti-etf-strategy/
 
 ### 6.2 Backtest 模式
 
+回测引擎已升级为**状态化每日回测**：每个交易日跑一次信号，与昨日持仓一致 → 持有；否则换仓（扣双边费率）；区间末强制平仓。提供 4 个 variant：
+
 ```bash
-go run . --mode backtest --bt-start 2025-12-01 --bt-end 2026-05-25
+# v3：本项目主流程多 Agent 决策
+go run . --mode=backtest --bt-start=2026-01-01 --bt-end=2026-06-09 --bt-variant=v3 --bt-max=0
+
+# joinquant：裸聚宽对照模式（旁路所有外围装饰，纯动量满仓）
+go run . --mode=backtest --bt-start=2026-01-01 --bt-end=2026-06-09 --bt-variant=joinquant --bt-max=0
+
+# both：v3 vs v3v2（叠加 V2 4 道闸门）A/B 对比
+go run . --mode=backtest --bt-start=2026-01-01 --bt-end=2026-06-09 --bt-variant=both --bt-max=0
 ```
 
+输出 Markdown 报告含 12+ 个风险/基准/费率指标：胜率、Sharpe、Sortino、Calmar、Profit Factor、最大回撤、年化收益、Alpha vs 510300 等。完整指标定义见 [docs/CHANGELOG-strategy.md#p0-3-回测引擎补齐风险基准费率指标](docs/CHANGELOG-strategy.md)。
+
 ```
-样本=60 实际建仓=38 胜率=55.26% 平均加权收益=+0.42% Sharpe=0.31
-📄 Markdown 报告已生成: report/backtest-20260525-183951.md
+样本=39 实际建仓=39 胜率=41.03% 平均加权收益=+0.79% Sharpe=0.96
+📄 回测报告已生成: report/backtest-v3-20260609-170937.md
 ```
 
 ---
 
-## 七、扩展与注意事项
+## 七、策略演进路线（P0~P5）
+
+详细的改动追溯、文件 diff、实测对比、学术依据见 **[docs/CHANGELOG-strategy.md](docs/CHANGELOG-strategy.md)**。当前进度：
+
+| 阶段 | 改造 | 难度 | 预期 Alpha 增量 | 状态 |
+|---|---|---|---|---|
+| **P0** | 应用必改 4 项对齐聚宽口径（dedupBySector / MinScore=0 / ruleRecommend 阈值 / PositionCap 仓位档位） | 低 | +20%（已验证）| ✅ 已实施 |
+| **P1** | 加 252 日绝对动量过滤（双动量 Antonacci 2014） | 低 | +5% ~ +10%，回撤改善 | ⏳ 待实施 |
+| **P2** | `score / σ_21` 凸性调整（防动量崩溃，Daniel & Moskowitz 2016） | 中 | Sharpe +0.2 ~ +0.3 | ⏳ 待实施 |
+| **P3** | 波动率目标定仓替换 PositionCap（Harvey et al. 2018） | 中 | MDD 减半 | ⏳ 待实施 |
+| **P4** | 残差动量（剥离 510300 β，Blitz et al. 2011） | 中 | 横截面排名更准 | ⏳ 待实施 |
+| **P5** | ML 多因子 + IPCA（Gu, Kelly, Xiu 2020 / Kelly, Pruitt, Su 2019） | 高 | 长周期 Sharpe +0.5 | 💭 思考中 |
+
+---
+
+## 八、扩展与注意事项
 
 1. **K 线无缓存**：单次 advice 约 65~70 个 HTTP 请求，回测约几千个。如需密集回测，建议在 `datasource` 层加文件缓存（按 `code+date` 落 JSON）。
 
@@ -340,6 +370,6 @@ go run . --mode backtest --bt-start 2025-12-01 --bt-end 2026-05-25
 
 ---
 
-## 八、免责声明
+## 九、免责声明
 
 本项目仅用于研究 / 学习多 Agent 编排与量化策略组合，**报告内容不构成投资建议**，请勿用于实盘决策。

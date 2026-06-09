@@ -12,24 +12,29 @@ import (
 
 // MoneyFlowAgent 资金流向 Agent。
 //
-// 设计说明：
+// 设计说明（双轨）：
 //
-//	真正的北向 / 主力数据需要付费/有限授权接口。本 Agent 采用"近似估算 + 规则映射"路线，
-//	完全基于已有 ETF K 线 + 量比 + 板块代理推导，保证无外部依赖也能给出合理资金面信号。
-//	后续若接入真实 dataapi，只需替换内部三个 estimate* 函数即可。
+//	① 真实数据轨道（优先）：
+//	   通过 datasource.MoneyFlowFetcher 接口拉取
+//	   - ETF 自身主力/超大单/大单 资金流（EastMoney push2 fflow.kline）
+//	   - 沪深港通北向资金（整体口径，作为市场情绪因子）
+//	   ETF 净申赎用主力净流入近似（A 股 ETF 没有公开的份额日变动接口）。
 //
-// 算法：
-//   - 近 5 日量价齐升 → 资金净流入（估算正值）
-//   - 量比放大 + 收阴 → 资金分歧 / 派发（估算负值）
-//   - 综合 score 0-100，sentiment 由 score 映射
+//	② 估算回退轨道（fallback）：
+//	   当真实接口失败 / 数据缺失时，自动回退到原有的 estimate* 函数，
+//	   完全基于 K 线 + 量比 + BOP 推导，保证 pipeline 不阻断。
+//
+//	最终 Summary 中带 [real] 或 [estimate] 标识，便于使用者识别数据来源。
 type MoneyFlowAgent struct {
 	DS         datasource.ETFDataSource
 	HistoryDay int // 默认 30
 	AsOf       time.Time
+	// UseRealData 控制是否优先使用真实接口；默认 true，失败自动回退。
+	UseRealData bool
 }
 
 func NewMoneyFlowAgent(ds datasource.ETFDataSource) *MoneyFlowAgent {
-	return &MoneyFlowAgent{DS: ds, HistoryDay: 30}
+	return &MoneyFlowAgent{DS: ds, HistoryDay: 30, UseRealData: true}
 }
 
 func (a *MoneyFlowAgent) Run(ctx context.Context, etf types.ScoredETF) (*types.MoneyFlowAnalysis, error) {
@@ -46,15 +51,99 @@ func (a *MoneyFlowAgent) Run(ctx context.Context, etf types.ScoredETF) (*types.M
 	}
 
 	res := &types.MoneyFlowAnalysis{ETFCode: etf.ETF.Code}
-	res.NorthCapital5d = estimateNorthCapital(klines, 5)
-	res.NorthCapital20d = estimateNorthCapital(klines, 20)
-	res.ETFNetSubscribe = estimateETFSubscribe(klines, 5)
-	res.MainNetInflow3d = estimateMainInflow(klines, 3)
+	dataReal := false
+
+	// ── 真实数据轨道 ──────────────────────────────────────────────────
+	if a.UseRealData {
+		if mf, ok := a.DS.(datasource.MoneyFlowFetcher); ok {
+			realOK := a.fillFromRealAPI(res, mf, etf.ETF.Code)
+			dataReal = realOK
+		}
+	}
+
+	// ── 估算回退（任一字段没填上就走 estimate；保证向下兼容） ────────
+	if !dataReal {
+		res.NorthCapital5d = estimateNorthCapital(klines, 5)
+		res.NorthCapital20d = estimateNorthCapital(klines, 20)
+		res.ETFNetSubscribe = estimateETFSubscribe(klines, 5)
+		res.MainNetInflow3d = estimateMainInflow(klines, 3)
+	}
 
 	res.Score = scoreMoneyFlow(res)
 	res.Sentiment = sentimentFromScore(res.Score)
-	res.Summary = composeMoneyFlowSummary(res)
+	res.Summary = composeMoneyFlowSummary(res, dataReal)
 	return res, nil
+}
+
+// fillFromRealAPI 用真实接口数据填充 MoneyFlowAnalysis。
+//
+// 字段映射：
+//   - MainNetInflow3d ← ETF 主力近 3 日净流入累计（亿元，按 asOf 截尾）
+//   - ETFNetSubscribe ← ETF 主力近 5 日净流入累计（A 股没公开 ETF 份额日变动，
+//                       用主力流入作为"场内申赎"代理；仍比纯估算可靠得多）
+//   - NorthCapital5d  ← 北向 5 日整体净流入（亿元，市场情绪因子）
+//   - NorthCapital20d ← 北向 20 日整体净流入
+//
+// 任一关键字段拉取失败即返回 false，由 Run 决定整体回退。
+func (a *MoneyFlowAgent) fillFromRealAPI(
+	res *types.MoneyFlowAnalysis,
+	mf datasource.MoneyFlowFetcher,
+	code string,
+) bool {
+	// 主力流：拉 30 个交易日，按 asOf 截尾
+	flow, err := mf.FetchETFMoneyFlow(code, 30)
+	if err != nil || len(flow) < 3 {
+		return false
+	}
+	flow = truncateFlowByAsOf(flow, a.AsOf)
+	if len(flow) < 3 {
+		return false
+	}
+
+	// 北向：拉 30 个交易日，按 asOf 截尾
+	north, err := mf.FetchNorthboundFlow(60)
+	if err != nil || len(north) < 5 {
+		return false
+	}
+	north = truncateNorthByAsOf(north, a.AsOf)
+	if len(north) < 5 {
+		return false
+	}
+
+	res.MainNetInflow3d = roundN(datasource.SumLastN(flow, 3, func(d datasource.MoneyFlowDay) float64 {
+		return d.MainNet
+	}), 2)
+	res.ETFNetSubscribe = roundN(datasource.SumLastN(flow, 5, func(d datasource.MoneyFlowDay) float64 {
+		return d.MainNet
+	}), 2)
+	res.NorthCapital5d = roundN(datasource.SumNorthboundLastN(north, 5), 2)
+	res.NorthCapital20d = roundN(datasource.SumNorthboundLastN(north, 20), 2)
+	return true
+}
+
+// truncateFlowByAsOf 仅保留 Date <= asOf 的数据；asOf 零值时不截。
+func truncateFlowByAsOf(days []datasource.MoneyFlowDay, asOf time.Time) []datasource.MoneyFlowDay {
+	if asOf.IsZero() {
+		return days
+	}
+	for i := len(days) - 1; i >= 0; i-- {
+		if !days[i].Date.After(asOf) {
+			return days[:i+1]
+		}
+	}
+	return nil
+}
+
+func truncateNorthByAsOf(days []datasource.NorthboundDay, asOf time.Time) []datasource.NorthboundDay {
+	if asOf.IsZero() {
+		return days
+	}
+	for i := len(days) - 1; i >= 0; i-- {
+		if !days[i].Date.After(asOf) {
+			return days[:i+1]
+		}
+	}
+	return nil
 }
 
 // estimateNorthCapital 用价格涨幅 × 成交额 × 系数估算"北向资金倾向"。
@@ -168,7 +257,7 @@ func sentimentFromScore(score float64) string {
 	}
 }
 
-func composeMoneyFlowSummary(r *types.MoneyFlowAnalysis) string {
+func composeMoneyFlowSummary(r *types.MoneyFlowAnalysis, dataReal bool) string {
 	tag := "中性"
 	switch r.Sentiment {
 	case "positive":
@@ -176,9 +265,13 @@ func composeMoneyFlowSummary(r *types.MoneyFlowAnalysis) string {
 	case "negative":
 		tag = "净流出"
 	}
+	source := "[estimate]"
+	if dataReal {
+		source = "[real]"
+	}
 	return fmt.Sprintf(
-		"%s：北向资金代理 5 日 %.2f / 20 日 %.2f；ETF 5 日净申购代理 %.2f；主力 3 日净流入代理 %.2f（单位：亿元，估算）。资金面评分 %.0f。",
-		tag,
+		"%s %s：北向 5 日 %.2f / 20 日 %.2f；ETF 5 日净申购 %.2f；主力 3 日净流入 %.2f（亿元）。资金面评分 %.0f。",
+		source, tag,
 		r.NorthCapital5d, r.NorthCapital20d,
 		r.ETFNetSubscribe, r.MainNetInflow3d,
 		r.Score,

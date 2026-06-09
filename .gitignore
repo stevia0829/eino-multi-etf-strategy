@@ -12,7 +12,11 @@ dist/
 config/secrets.json
 
 report/etf-report-*.md
+report/backtest-*.md
+report/backtest-compare-*.md
+report/state-*.json
 report/*.csv
 report/*.json
+report/strategy.py
 *.tmp
 *.swp

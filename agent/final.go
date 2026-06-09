@@ -356,13 +356,24 @@ func clamp(v, lo, hi float64) float64 {
 	return v
 }
 
+// ruleRecommend 把综合分映射成 recommendation。
+//
+// 阈值口径（已对齐聚宽：动量分一旦 >0 就建议持有 rank[0]）：
+//   - 综合分 ≥ 70 → strong_buy（动量加速，可加仓）
+//   - 综合分 ≥ 40 → buy        （正向动量，建仓 / 持有；对应底层动量正分）
+//   - 综合分 ≥ 25 → hold       （动量微弱，已持仓可观察，不建议新建仓）
+//   - 否则        → avoid      （动量为负或多因子普遍走弱）
+//
+// 设计依据：底层 normalizeStrategy3Score 把 score=0 映射到 50，score=0.3 → ~63。
+// 旧阈值 65/50 会把"动量弱正向 + 多因子中性"的标的（综合分 50~65）映射成 hold，
+// 在每日状态机里等同于平仓 → 频繁空仓 / 错过持续上涨。新阈值让动量正向标的稳定进 buy。
 func ruleRecommend(s float64) string {
 	switch {
-	case s >= 80:
+	case s >= 70:
 		return "strong_buy"
-	case s >= 65:
+	case s >= 40:
 		return "buy"
-	case s >= 50:
+	case s >= 25:
 		return "hold"
 	default:
 		return "avoid"

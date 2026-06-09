@@ -115,7 +115,7 @@ func DefaultRotationParams() RotationParams {
 	return RotationParams{
 		MDays:                    21,
 		MaxScore:                 6,
-		MinScore:                 -1, // 允许负分标的进入下游 Agent，由 Final/Screener 决定是否剔除
+		MinScore:                 0, // 对齐聚宽 g.min_score=0：负分动量直接出局
 		ScoreThresholdMultiplier: 1.1,
 		TopN:                     5,
 	}

@@ -217,7 +217,7 @@ func runBacktest(startStr, endStr, dateStr string, step, hold, maxSamples int, v
 	}
 
 	switch variant {
-	case "v3", "v3v2":
+	case "v3", "v3v2", "joinquant":
 		res := runOne(variant)
 		filename := fmt.Sprintf("backtest-%s-%s.md", variant, time.Now().Format("20060102-150405"))
 		path := filepath.Join(reportDir, filename)
@@ -240,7 +240,7 @@ func runBacktest(startStr, endStr, dateStr string, step, hold, maxSamples int, v
 		abs, _ := filepath.Abs(path)
 		fmt.Println("📄 V3 vs V3+V2 对比回测报告已生成:", abs)
 	default:
-		fmt.Printf("invalid --bt-variant: %s (expect v3/v3v2/both)\n", variant)
+		fmt.Printf("invalid --bt-variant: %s (expect v3/v3v2/both/joinquant)\n", variant)
 		os.Exit(2)
 	}
 	_ = agent.NewScreenerAgent

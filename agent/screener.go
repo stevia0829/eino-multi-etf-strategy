@@ -22,17 +22,21 @@ type ScreenerAgent struct {
 	TopN       int
 	// AsOf 指定基准日期；零值表示当天最新行情，用于回测 / 复盘。
 	AsOf time.Time
+	// DedupBySector 是否对 Top5 做同板块去重；默认 false（对齐聚宽 get_etf_rank 不去重）。
+	// 开启后每个 sector 仅保留分数最高的一只，旧版本默认行为。
+	DedupBySector bool
 
 	Rotation *RotationAgent
 }
 
 func NewScreenerAgent(ds datasource.ETFDataSource) *ScreenerAgent {
 	return &ScreenerAgent{
-		DS:         ds,
-		HistoryDay: 60,
-		MinScore:   0,
-		TopN:       5,
-		Rotation:   NewRotationAgent(ds),
+		DS:            ds,
+		HistoryDay:    60,
+		MinScore:      0,
+		TopN:          5,
+		DedupBySector: false, // 默认关闭，对齐聚宽
+		Rotation:      NewRotationAgent(ds),
 	}
 }
 
@@ -107,10 +111,12 @@ func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) 
 		})
 	}
 
-	// 同板块去重：每个 sector 仅保留分数最高的一只，避免 Top5 在同一风险因子上双倍下注。
-	// scored 已按 RotationAgent 输出的顺序（动量分由高到低）排列，这里只需顺序遍历挑出
-	// 各 sector 第一次出现的标的即可保证留下的是该 sector 的最高分。
-	scored = dedupBySector(scored)
+	// 同板块去重（可选）：每个 sector 仅保留分数最高的一只，避免 Top5 在同一风险因子上双倍下注。
+	// 默认关闭，对齐聚宽 get_etf_rank（不去重）。如需保留多 Agent 风险分散，把 DedupBySector
+	// 显式设为 true。
+	if a.DedupBySector {
+		scored = dedupBySector(scored)
+	}
 
 	top := scored
 	if a.TopN > 0 && len(top) > a.TopN {
