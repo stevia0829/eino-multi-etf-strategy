@@ -1,0 +1,23 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "350fe0c443631316ed42fd12ffbe0903e3c0d67b",
+  "prompts": {
+    "4b380db8de6ca426": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-6edfa9a1-7f24-4c8c-b5da-4ca20ad97e4f",
+        "model": "default"
+      },
+      "human_author": "stevia0829 <1044686276@qq.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
