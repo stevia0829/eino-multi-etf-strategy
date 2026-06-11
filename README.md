@@ -35,7 +35,7 @@ go run . [flags]
 |---|---|---|
 | `--mode` | `advice` | 运行模式：`advice`（单次出报告） / `backtest`（历史回测） |
 | `--date` | 当天 | 基准日期 `YYYY-MM-DD`，可用于复盘 / 跑指定交易日 |
-| `--current-hold` | 空 | 可选：当前持仓 ETF 代码（如 `159915`），用于在报告"持仓对照"章节给出建议；**留空即跳过，系统不做任何本地持久化** |
+| `--current-hold` | 空 | 可选：当前持仓 ETF 代码，**支持逗号分隔多持仓**（如 `159915,512660`）；用于报告"持仓对照"、Screener 持仓豁免位、FinalAgent 持仓评审、PreOpen 加仓 / 新开仓区分；**留空即跳过，系统不做任何本地持久化** |
 | `--report-dir` | `report` | 报告输出目录（同时也是 MemoryAgent 读取历史报告的目录） |
 | `--skip-report` | `false` | 仅打印结果，不落地 Markdown |
 | `--bt-start` | 一年前 | 回测起始日（仅 backtest 模式） |
@@ -62,6 +62,9 @@ go run . --date 2026-05-26 --report-dir ./tmp_report
 
 # 给出"我手上是创业板 ETF"的持仓对照建议
 go run . --current-hold 159915
+
+# 多持仓场景：同时持有创业板 ETF 与军工 ETF，逐只给出对照与持仓评审
+go run . --current-hold 159915,512660
 
 # 历史回测：最近 60 个采样点，每个采样点持有 5 个交易日
 go run . --mode backtest --bt-start 2025-12-01 --bt-end 2026-05-25 --bt-step 5 --bt-hold 5
@@ -183,6 +186,51 @@ NewsAgent 与 TechnicalAgent 已扩展为对 Top5 进行批量分析，FinalAgen
 
 输出渲染至 `FinalDecision.Picks`，可用于报告"投委会精选"小节。
 
+### 2.6 多持仓感知 & 持仓评审（HoldReviews）
+
+advice 模式下 `--current-hold` 现已支持**逗号分隔多持仓**（如 `159915,512660`）。整套流程对持仓的处理遵循"**只增加可见性，不抬分、不绕过过滤**"的原则：
+
+- **Pipeline / 状态层**：[orchestrator/pipeline.go](orchestrator/pipeline.go) `Pipeline.CurrentHolds` → [types/types.go](types/types.go) `AgentState.CurrentHolds`，单值 `CurrentHold` 字段保留为 `CurrentHolds[0]` 的兼容快照。
+- **Screener 持仓豁免位**：[agent/screener.go](agent/screener.go) `ScreenerAgent.CurrentHolds` 与 [agent/rotation.go](agent/rotation.go) `RotationParams.MustIncludeCodes` 联动 —— 持仓若**已通过 MinScore / 过热 / Regime 闸门**但被截到 TopN 之外，会按其客观分数追加在结果末尾；分数被剔除则不出现，不插队不抬分。`DedupBySector=true` 时也会单独保留命中持仓，避免被同板块更高分标的吃掉。新增 `ScoredETF.IsCurrentHold` 标记，CLI / 报告里以 `🟦持仓` 高亮。
+- **多持仓对照**：[agent/rotation.go](agent/rotation.go) `BuildHoldAdvices` 为每只持仓单独生成 `HoldAdvice`，渲染至 `AgentState.HoldAdvices`；旧字段 `HoldAdvice` 仍写入第一只持仓，老报告 / 老 sidecar 兼容。
+- **HoldReviews 持仓评审**：[types/types.go](types/types.go) 新增 `FinalDecision.HoldReviews []HoldReview`，由 FinalAgent / 规则兜底输出"keep / trim / rotate"三档客观建议，**不参与 Recommendation / Picks 计算**，避免持仓主观偏差污染主决策。CLI 终端会单独打印一段 `--- 持仓评审 (HoldReviews) ---`。
+
+> 设计前提：advice 模式只在每天开盘前给一次信号，持仓信号的取舍由用户自己决定 → 系统给客观可解释的"是否还在 Top / 板块比较 / 消息面 + 技术面" 评审，不替用户决定换仓。
+
+### 2.7 风险层：回撤冷却 & 盈亏比闸门
+
+均集中在 [agent/final.go](agent/final.go)，遵守 AGENTS.md 第 7 条：**短线回撤不强制降档主信号**，避免 advice 模式频繁换手吃费率，只在"新开仓 / 集合竞价追入 / 加仓"路径上拦截。
+
+| 闸门 | 函数 | 触发条件 | 主信号行为 | PreOpen 行为 |
+|---|---|---|---|---|
+| 回撤冷却 | `CapByPullbackCooldownForState` | 近 5 日高点回撤 ≥ 5% **且** 未收复 MA5 / 最近阴线半分位 | 持仓 / 未提供持仓 → 不降档，仅注入"【回撤冷却】"提示文案；候选中目标非持仓 → 提示"换仓目标短线未修复" | — |
+| 回撤冷却（备选 Pick） | `CapByPullbackCooldown` | 同上 | 备选 Pick（`buildAltPick`）直接 `buy → hold`，避免分散下注同时追高 | — |
+| 盈亏比闸门 | `CapByRiskReward` | `(take-entry) / (entry-stop) < 1.4` 或 entry/stop/take 结构无效 | 主信号注入"【盈亏比提示】"，**不降档** | `applyVerdictRule` 命中 → `chase / on_target` 自动降为 `wait_pullback`，`adj_entry=0`（硬拦截） |
+
+> 失效场景：单边强趋势中 5 日 -5% 回撤 + MA5 失守可能是正常调整，AGENTS.md 第 1 条要求长样本回测后再加任何降档；当前实现已选择"提示而不降档"作为 trade-off。
+
+### 2.8 集合竞价复核（PreOpen Agent）
+
+`cmd/preopen/main.go` 的 8:50 复核流程已经接入持仓维度，用来区分"加仓"与"新开仓"两条路径：
+
+- 新增 `--current-hold a,b,c` 入参；持仓集合通过 [types/types.go](types/types.go) `PreOpenAnalysis.CurrentHolds` 透传给规则与 LLM。
+- 规则版判定（[agent/preopen.go](agent/preopen.go) `applyVerdictRule`）：
+  - **持仓 + 低开 ≥ 1%** → `wait_pullback`，`adj_entry=0`（不加仓）；
+  - **空仓 + 低开 ≥ 1%** → 仅当大盘 `gap_pct ≥ -0.3%`、`premium_pct ≤ +0.5%`、`gap_pct > -0.8%` 时才允许 `chase` 折价介入，否则视为弱势延续 `wait_pullback`；
+  - 大盘 `gap_pct ≤ -0.8%` → `chase / on_target` 一并降级为 `wait_pullback`，持仓侧 `adj_entry=0`；
+  - 盈亏比硬拦截：`CapByRiskReward(buy, adj_entry, adj_stop, adj_take)` 命中 → `wait_pullback`，note 区分"已持仓不加仓 / 空仓暂不追"。
+- LLM 路径在 system prompt 中显式接收 `current_holds`，与规则版口径一致。
+- 报告生成器 [report/preopen_writer.go](report/preopen_writer.go) 在头部追加"当前持仓"一行，保留可追溯性。
+
+### 2.9 NewsAgent 关键词精确化
+
+历史教训：**「煤炭 ETF」用板块词「能源」搜新闻，会把新能源 / 个股处罚 / 油气消息混进结果**，使 NewsAgent 情绪打分被噪声主导。
+
+- [agent/news.go](agent/news.go) `buildNewsKeywords` 重写为「ETF 自身（代码 / 全名 / 去基金后缀）→ ETF 级精确词 → 板块同义词」三层；
+- 新增 `etfNewsKeywordOverrides`（约 70 只 ETF 的精确词典）：黄金 → `黄金/COMEX黄金`，煤炭 → `动力煤/焦煤/秦皇岛港煤价/迎峰度夏`，恒生科技 → `恒生科技/南向资金` 等；
+- `skipBroadSectorKeyword` 当 sector 属于「能源 / 科技 / 消费 / 材料 / 宽基」等过宽板块且已有精确词时，**主动剥离板块同义词**（板块词的副作用大于覆盖收益）；
+- 单元测试 [agent/news_final_test.go](agent/news_final_test.go) 覆盖煤炭 ETF 用例，确保不再混入"能源"泛词。
+
 ---
 
 ## 三、动量打分器
@@ -253,17 +301,20 @@ eino-muti-etf-strategy/
 ├── orchestrator/
 │   └── pipeline.go                 # 多 Agent 编排（fan-out/fan-in）
 ├── agent/
-│   ├── screener.go                 # 量化筛选（轮动 + 技术指标 + 归一化）
-│   ├── rotation.go                 # 21 日加权动量 + Action 语义
+│   ├── screener.go                 # 量化筛选（轮动 + 技术指标 + 归一化 + 持仓豁免位）
+│   ├── rotation.go                 # 21 日加权动量 + Action 语义 + MustIncludeCodes / BuildHoldAdvices
 │   ├── technical.go                # 技术面 LLM Agent（Top5 批量）
-│   ├── news.go                     # 消息面 LLM Agent（Top5 批量）
+│   ├── news.go                     # 消息面 LLM Agent（Top5 批量 + ETF 级精确关键词）
 │   ├── global.go                   # 跨境联动 LLM Agent
 │   ├── regime.go                   # 宏观环境 (510300 趋势/仓位上限)
 │   ├── moneyflow.go                # 资金面代理估算
 │   ├── memory.go                   # 长期记忆 Agent（读 report/ 最近 5 份）
-│   ├── final.go                    # 投委会决策融合 (LLM + 规则降级)
+│   ├── final.go                    # 投委会决策融合 + 回撤冷却 / 盈亏比闸门 / HoldReviews
+│   ├── preopen.go                  # 8:50 集合竞价复核（持仓 vs 新开仓 verdict）
 │   ├── factor_weights.go           # 板块自适应权重 + 因子相关性提示
 │   └── common.go                   # 共享：callLLMJSON / weightedScore / Cap
+├── cmd/
+│   └── preopen/main.go             # 集合竞价复核 CLI（--current-hold 支持多持仓）
 ├── indicator/
 │   ├── momentum_score.go           # 21 日加权动量得分
 │   └── indicator.go                # MA / RSI / MACD / Volatility 等

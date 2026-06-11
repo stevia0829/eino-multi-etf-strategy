@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eino-multi-etf-strategy/agent"
@@ -23,7 +24,7 @@ func main() {
 		timeFlag    = flag.String("time", "09:30", "模拟运行时刻 (HH:MM, 24h, 仅 advice 模式生效)，作为指数/数据源 AsOf 锚点")
 		reportDir   = flag.String("report-dir", "report", "Markdown 报告输出目录")
 		skipReport  = flag.Bool("skip-report", false, "仅打印结果，不落地报告")
-		currentHold = flag.String("current-hold", "", "可选：当前持仓 ETF 代码（如 159915），用于在报告中给出持仓对照建议；留空则跳过该章节，系统不做任何本地持久化")
+		currentHold = flag.String("current-hold", "", "可选：当前持仓 ETF 代码（支持多个，逗号分隔，如 159915,512660），用于在报告中给出持仓对照与 FinalAgent 持仓评审；留空则跳过该章节，系统不做任何本地持久化")
 		mode        = flag.String("mode", "advice", "运行模式：advice（默认，单次出报告） / backtest（历史胜率回测）")
 		btStart     = flag.String("bt-start", "", "backtest 起始日 (YYYY-MM-DD)")
 		btEnd       = flag.String("bt-end", "", "backtest 结束日 (YYYY-MM-DD)，默认 --date 或今天")
@@ -87,6 +88,8 @@ func main() {
 		os.Exit(1)
 	}
 	pipe.Screener.AsOf = asOf
+	holds := parseCurrentHolds(*currentHold)
+	pipe.CurrentHolds = holds
 
 	state, err := pipe.Run(ctx)
 	if err != nil {
@@ -95,16 +98,27 @@ func main() {
 	}
 
 	// 持仓对照（无状态：仅本次会话使用 --current-hold 传入的值）
-	state.CurrentHold = *currentHold
-	if state.Screener != nil {
-		state.HoldAdvice = agent.BuildHoldAdvice(*currentHold, state.Screener.Top5)
+	state.CurrentHolds = holds
+	if len(holds) > 0 {
+		state.CurrentHold = holds[0]
+	}
+	if state.Screener != nil && len(holds) > 0 {
+		state.HoldAdvices = agent.BuildHoldAdvices(holds, state.Screener.Top5)
+		if len(state.HoldAdvices) > 0 {
+			first := state.HoldAdvices[0]
+			state.HoldAdvice = &first
+		}
 	}
 
 	fmt.Println()
 	fmt.Println("--- Top5 候选 ---")
 	for i, e := range state.Screener.Top5 {
-		fmt.Printf("%d) %s(%s) sector=%s score=%.2f action=%s reason=%s\n",
-			i+1, e.ETF.Name, e.ETF.Code, e.ETF.Sector, e.Score, e.Action, e.Reason)
+		tag := ""
+		if e.IsCurrentHold {
+			tag = " 🟦持仓"
+		}
+		fmt.Printf("%d) %s(%s)%s sector=%s score=%.2f action=%s reason=%s\n",
+			i+1, e.ETF.Name, e.ETF.Code, tag, e.ETF.Sector, e.Score, e.Action, e.Reason)
 	}
 
 	fmt.Println()
@@ -113,10 +127,12 @@ func main() {
 	fmt.Printf("%s(%s) 板块=%s 价格=%.3f 综合分=%.2f 动作=%s\n",
 		best.ETF.Name, best.ETF.Code, best.ETF.Sector, best.ETF.Price, best.Score, best.ActionDesc)
 
-	if state.HoldAdvice != nil {
+	if len(state.HoldAdvices) > 0 {
 		fmt.Println()
 		fmt.Println("--- 持仓对照 ---")
-		fmt.Println(state.HoldAdvice.Suggestion)
+		for _, a := range state.HoldAdvices {
+			fmt.Printf("· %s : %s\n", a.CurrentHold, a.Suggestion)
+		}
 	}
 
 	fmt.Println()
@@ -144,6 +160,18 @@ func main() {
 		fmt.Printf("建议: %s\n", state.Final.Recommendation)
 		fmt.Printf("入场: %.3f  止损: %.3f  止盈: %.3f\n", state.Final.EntryPrice, state.Final.StopLoss, state.Final.TakeProfit)
 		fmt.Println("理由:", state.Final.Reasoning)
+		if len(state.Final.HoldReviews) > 0 {
+			fmt.Println()
+			fmt.Println("--- 持仓评审 (HoldReviews) ---")
+			for _, r := range state.Final.HoldReviews {
+				inTop := "外"
+				if r.InTop {
+					inTop = fmt.Sprintf("Top%d", r.Rank)
+				}
+				fmt.Printf("· %s(%s) [%s] 分数=%.2f 建议=%s news=%s tech=%s\n  %s\n",
+					r.ETFName, r.ETFCode, inTop, r.Score, r.ActionDesc, r.NewsBias, r.TechTrend, r.Rationale)
+			}
+		}
 	}
 
 	if !*skipReport {
@@ -162,6 +190,32 @@ func printJSON(label string, v interface{}) {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println("[" + label + "]")
 	fmt.Println(string(b))
+}
+
+// parseCurrentHolds 解析 --current-hold 逗号分隔的多持仓列表，去空白 + 去重保序。
+// 留空（""）时返回 nil，整段 advice 行为与"未提供持仓"一致。
+func parseCurrentHolds(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // runBacktest 历史胜率回测：

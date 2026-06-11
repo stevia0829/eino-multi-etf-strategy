@@ -27,10 +27,11 @@ import (
 //  3. 走规则 + 可选 LLM 综合论证，输出 preopen-report-*.md
 func main() {
 	var (
-		reportDir  = flag.String("report-dir", "report", "8:50 主报告所在目录（用于自动查找 etf-report-*.json）")
-		baseReport = flag.String("base-report", "", "显式指定 8:50 报告 JSON 路径；留空则自动取当日最新")
-		outDir     = flag.String("out-dir", "report", "preopen 复核报告输出目录")
-		skipLLM    = flag.Bool("skip-llm", false, "跳过 LLM，仅走规则路径")
+		reportDir   = flag.String("report-dir", "report", "8:50 主报告所在目录（用于自动查找 etf-report-*.json）")
+		baseReport  = flag.String("base-report", "", "显式指定 8:50 报告 JSON 路径；留空则自动取当日最新")
+		outDir      = flag.String("out-dir", "report", "preopen 复核报告输出目录")
+		currentHold = flag.String("current-hold", "", "可选：当前已持有 ETF 代码（支持多个，逗号分隔）；用于集合竞价复核时区分加仓与新开仓")
+		skipLLM     = flag.Bool("skip-llm", false, "跳过 LLM，仅走规则路径")
 	)
 	flag.Parse()
 
@@ -49,6 +50,13 @@ func main() {
 	if state.Final == nil {
 		fmt.Println("base report missing final decision")
 		os.Exit(1)
+	}
+	if *currentHold != "" {
+		holds := parseCurrentHolds(*currentHold)
+		state.CurrentHolds = holds
+		if len(holds) > 0 {
+			state.CurrentHold = holds[0]
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -136,4 +144,29 @@ func loadState(path string) (*types.AgentState, error) {
 		return nil, fmt.Errorf("unmarshal %s: %w", path, err)
 	}
 	return &s, nil
+}
+
+// parseCurrentHolds 与主程序保持一致：逗号分隔、去空、去重保序。
+func parseCurrentHolds(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

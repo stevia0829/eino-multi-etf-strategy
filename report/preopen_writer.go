@@ -43,6 +43,11 @@ func BuildPreOpenMarkdown(a *types.PreOpenAnalysis) string {
 	if a.BaseReportPath != "" {
 		b.WriteString(fmt.Sprintf("- 基准报告: `%s`\n", a.BaseReportPath))
 	}
+	if len(a.CurrentHolds) > 0 {
+		b.WriteString(fmt.Sprintf("- 当前持仓: `%s`\n", strings.Join(a.CurrentHolds, ", ")))
+	} else if a.CurrentHold != "" {
+		b.WriteString(fmt.Sprintf("- 当前持仓: `%s`\n", a.CurrentHold))
+	}
 	b.WriteString(fmt.Sprintf("- 大盘集合竞价情绪: **`%s`**\n\n", a.MarketBias))
 	b.WriteString("---\n\n")
 

@@ -15,9 +15,9 @@ import (
 
 // Trade 单次回测交易记录（状态化每日回测：一笔从 EntryDate 入场到 ExitDate 平仓的完整交易）。
 type Trade struct {
-	AsOf           time.Time `json:"as_of"`           // 信号日（= EntryDate）
-	EntryDate      time.Time `json:"entry_date"`      // 入场日（信号产生当日收盘）
-	ExitDate       time.Time `json:"exit_date"`       // 平仓日（信号反转或区间结束）
+	AsOf           time.Time `json:"as_of"`      // 信号日（= EntryDate）
+	EntryDate      time.Time `json:"entry_date"` // 入场日（信号产生当日收盘）
+	ExitDate       time.Time `json:"exit_date"`  // 平仓日（信号反转或区间结束）
 	BestCode       string    `json:"best_code"`
 	BestName       string    `json:"best_name"`
 	Sector         string    `json:"sector"`
@@ -63,10 +63,10 @@ type Result struct {
 
 	// ── 新增：风险与基准指标 ─────────────────────────────────────────
 	EquityCurve     []EquityPoint `json:"equity_curve"`
-	FinalEquity     float64       `json:"final_equity"`     // 最终累计净值
-	TotalReturn     float64       `json:"total_return"`     // 累计收益率 = FinalEquity-1
-	AnnualReturn    float64       `json:"annual_return"`    // 年化收益（按交易日跨度推算）
-	MaxDrawdown     float64       `json:"max_drawdown"`     // 最大回撤（正数表示回撤幅度）
+	FinalEquity     float64       `json:"final_equity"`  // 最终累计净值
+	TotalReturn     float64       `json:"total_return"`  // 累计收益率 = FinalEquity-1
+	AnnualReturn    float64       `json:"annual_return"` // 年化收益（按交易日跨度推算）
+	MaxDrawdown     float64       `json:"max_drawdown"`  // 最大回撤（正数表示回撤幅度）
 	MaxDrawdownDate time.Time     `json:"max_drawdown_date"`
 	Calmar          float64       `json:"calmar"`           // 年化 / |MDD|
 	Sortino         float64       `json:"sortino"`          // 平均收益 / 下行波动 × sqrt(N)
@@ -131,7 +131,9 @@ func NewEngine(ds datasource.ETFDataSource) *Engine {
 // 算法（每日 mark-to-market 持仓状态机）：
 //
 //  1. 用基准 510300 的 K 线确定有效交易日序列；
+//
 //  2. 维护 currentHold（当前持仓 ETF 代码）+ holdEntry（入场日 K 线）+ entryPrice + posCap；
+//
 //  3. 每个交易日 d：
 //     a) 跑 Screener（asOf=d）→ 当日 best；
 //     b) 跑 Regime（asOf=d）→ 当日 PositionCap 与 trend；
@@ -202,18 +204,18 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 
 	// 持仓状态
 	type holdState struct {
-		code         string
-		name         string
-		sector       string
-		quantScore   float64
-		regimeTrend  string
-		posCap       float64
-		entryDate    time.Time
-		entryPrice   float64
-		klineCache   []types.KLine // 入场后预拉的 K 线，用于 mark-to-market 与平仓
-		v2Switched   bool
-		v2Rejected   string
-		recommend    string
+		code        string
+		name        string
+		sector      string
+		quantScore  float64
+		regimeTrend string
+		posCap      float64
+		entryDate   time.Time
+		entryPrice  float64
+		klineCache  []types.KLine // 入场后预拉的 K 线，用于 mark-to-market 与平仓
+		v2Switched  bool
+		v2Rejected  string
+		recommend   string
 	}
 	var hold *holdState
 	exit := func(d time.Time, exitPrice float64, reason string) {
@@ -426,6 +428,9 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 		}
 
 		st := &types.AgentState{Screener: scr, Regime: regime}
+		if hold != nil {
+			st.CurrentHold = hold.code
+		}
 		dec := &types.FinalDecision{TargetETF: target}
 		agent.RuleBasedDecision(dec, st)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,9 @@ type Pipeline struct {
 	MoneyFlow *agent.MoneyFlowAgent
 	Final     *agent.FinalAgent
 	Logger    *log.Logger
+	// CurrentHolds 是用户通过 --current-hold 传入的当前持仓代码列表（支持多个），仅用于本次 advice 决策。
+	// 仅本次会话使用，系统不做任何本地持久化。
+	CurrentHolds []string
 }
 
 // NewPipeline 通过统一配置构建多 agent pipeline。
@@ -56,9 +60,14 @@ func staticFallback(system, user string) string {
 //
 //	start → ScreenerAgent → [ NewsAgent ‖ GlobalMarketAgent ‖ TechnicalAgent ] → FinalAgent → end
 func (p *Pipeline) Run(ctx context.Context) (*types.AgentState, error) {
-	state := &types.AgentState{}
+	holds := normalizeHolds(p.CurrentHolds)
+	state := &types.AgentState{
+		CurrentHolds: holds,
+		CurrentHold:  firstHold(holds),
+	}
 
 	p.Logger.Println("[pipeline] step1: screener running…")
+	p.Screener.CurrentHolds = holds
 	scr, err := p.Screener.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("screener: %w", err)
@@ -140,3 +149,39 @@ func (p *Pipeline) Run(ctx context.Context) (*types.AgentState, error) {
 }
 
 var _ llm.Client = (*llm.Resilient)(nil) // 编译期接口断言
+
+// normalizeHolds 去掉空白 / 重复，保持原顺序，便于多持仓 advice 一致地传入下游。
+func normalizeHolds(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = trimHold(s)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func firstHold(in []string) string {
+	if len(in) == 0 {
+		return ""
+	}
+	return in[0]
+}
+
+// trimHold 包成单独函数，便于将来扩展（如代码格式标准化）。
+func trimHold(s string) string {
+	return strings.TrimSpace(s)
+}

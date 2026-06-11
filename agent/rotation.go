@@ -132,6 +132,15 @@ type RotationParams struct {
 	// 取值与 classifyRegime 一致：bull / neutral_up / neutral / bear / risk_off。
 	// 空字符串视为"未知"，按"启用 P1"保守处理（避免漏过崩盘期）。
 	RegimeTrend string
+
+	// MustIncludeCodes 强制保留进结果列表的 ETF 代码（典型用法：当前持仓）。
+	// 它不会改变评分逻辑、不会插队、不会让标的"绕过"MinScore / 过热过滤，
+	// 仅在 TopN 截断时给这些标的一个豁免位：若分数本就在 TopN 内则不影响，
+	// 若分数被截断到 TopN 外，则按客观分数追加在结果末尾。
+	// 设计目的：advice 模式下让用户能在同一份候选里直接看到持仓的客观动量分，
+	// 自行判断"主信号没推荐我，但持仓动量是不是确实差到要切"。
+	// 仅对 advice 生效；回测引擎不传该字段，回测行为完全不变。
+	MustIncludeCodes []string
 }
 
 func DefaultRotationParams() RotationParams {
@@ -228,7 +237,7 @@ func (a RotationAction) Label() string {
 	return string(a)
 }
 
-// BuildHoldAdvice 把"用户当前持仓"与本次 Top5 排名做对照，返回持仓建议。
+// BuildHoldAdvice 把"用户当前持仓"与本次合并后的候选列表（已含持仓豁免位）做对照，返回持仓建议。
 // 当 currentHold 为空字符串时返回 nil，调用方据此跳过对应章节。
 // 完全无状态：currentHold 仅本次会话内使用，不做任何持久化。
 func BuildHoldAdvice(currentHold string, top []types.ScoredETF) *types.HoldAdvice {
@@ -242,6 +251,7 @@ func BuildHoldAdvice(currentHold string, top []types.ScoredETF) *types.HoldAdvic
 	}
 	for i, e := range top {
 		if e.ETF.Code == currentHold {
+			// HitTop 维持原语义：是否进入"原 Top5 主名次"内（含豁免追加位也算 hit）。
 			advice.HitTop = true
 			advice.Rank = i + 1
 			advice.HitName = e.ETF.Name
@@ -252,6 +262,28 @@ func BuildHoldAdvice(currentHold string, top []types.ScoredETF) *types.HoldAdvic
 	}
 	advice.Suggestion = composeHoldSuggestion(advice, top[0])
 	return advice
+}
+
+// BuildHoldAdvices 在 advice 模式下为多只持仓批量生成持仓对照建议。
+// 返回顺序与 currentHolds 一致；空持仓 / 无候选时返回 nil。
+func BuildHoldAdvices(currentHolds []string, top []types.ScoredETF) []types.HoldAdvice {
+	if len(currentHolds) == 0 || len(top) == 0 {
+		return nil
+	}
+	out := make([]types.HoldAdvice, 0, len(currentHolds))
+	for _, code := range currentHolds {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			continue
+		}
+		if a := BuildHoldAdvice(code, top); a != nil {
+			out = append(out, *a)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func composeHoldSuggestion(a *types.HoldAdvice, best types.ScoredETF) string {
@@ -452,8 +484,36 @@ func (a *RotationAgent) Rank(ctx context.Context) ([]RotationCandidate, error) {
 		return filtered[i].Score > filtered[j].Score
 	})
 
+	// 4) TopN 截断 + 持仓豁免：
+	//    - 默认行为：截到前 TopN 名；
+	//    - 若 MustIncludeCodes 非空（advice 持仓注入），先记录每只持仓在 filtered 中的命中位置；
+	//    - 若持仓本就在 TopN 内：不额外处理；
+	//    - 若持仓在 TopN 外但通过了 MinScore + 过热闸门：按客观分数追加在结果末尾，
+	//      不插队、不抬分、不绕过过滤；
+	//    - 持仓未通过过滤（已被剔除）则忽略，避免污染候选。
 	if p.TopN > 0 && len(filtered) > p.TopN {
-		filtered = filtered[:p.TopN]
+		head := filtered[:p.TopN]
+		tail := filtered[p.TopN:]
+		if len(p.MustIncludeCodes) > 0 {
+			must := make(map[string]struct{}, len(p.MustIncludeCodes))
+			for _, c := range p.MustIncludeCodes {
+				if c = strings.TrimSpace(c); c != "" {
+					must[c] = struct{}{}
+				}
+			}
+			// 已在 head 中的持仓不重复追加
+			for _, c := range head {
+				delete(must, c.ETF.Code)
+			}
+			// 在 tail 里按原始客观分数顺序挑出持仓追加
+			for _, c := range tail {
+				if _, ok := must[c.ETF.Code]; ok {
+					head = append(head, c)
+					delete(must, c.ETF.Code)
+				}
+			}
+		}
+		filtered = head
 	}
 	return filtered, nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/eino-multi-etf-strategy/datasource"
@@ -26,6 +27,10 @@ type ScreenerAgent struct {
 	// DedupBySector 是否对 Top5 做同板块去重；默认 false（对齐聚宽 get_etf_rank 不去重）。
 	// 开启后每个 sector 仅保留分数最高的一只，旧版本默认行为。
 	DedupBySector bool
+	// CurrentHolds 用户当前持仓 ETF 代码列表（advice 模式注入；回测/聚宽模式不传）。
+	// 持仓在排名中享有"豁免追加位"：分数本就在 TopN 内不影响，落在 TopN 外则按客观分数追加在末尾。
+	// 不参与 Score 修正、不抬分、不绕过过滤。
+	CurrentHolds []string
 
 	Rotation *RotationAgent
 }
@@ -47,8 +52,9 @@ func NewScreenerAgent(ds datasource.ETFDataSource) *ScreenerAgent {
 //  3. 将原始 score 归一化为 0~100 综合分
 //  4. 取 TopN 并标注最佳标的
 func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) {
-	// 同步 AsOf 给 RotationAgent
+	// 同步 AsOf / 持仓豁免给 RotationAgent
 	a.Rotation.AsOf = a.AsOf
+	a.Rotation.Params.MustIncludeCodes = a.CurrentHolds
 
 	cands, err := a.Rotation.Rank(ctx)
 	if err != nil {
@@ -56,6 +62,13 @@ func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) 
 	}
 	if len(cands) == 0 {
 		return &types.ScreenerResult{AsOfDate: asOfOrNow(a.AsOf)}, nil
+	}
+
+	holdSet := make(map[string]struct{}, len(a.CurrentHolds))
+	for _, h := range a.CurrentHolds {
+		if h = strings.TrimSpace(h); h != "" {
+			holdSet[h] = struct{}{}
+		}
 	}
 
 	scored := make([]types.ScoredETF, 0, len(cands))
@@ -103,25 +116,31 @@ func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) 
 		}
 
 		scored = append(scored, types.ScoredETF{
-			ETF:        etf,
-			Score:      normalized,
-			Indicators: ind,
-			Reason:     buildRotationReason(c, action),
-			Action:     string(action),
-			ActionDesc: action.Label(),
+			ETF:           etf,
+			Score:         normalized,
+			Indicators:    ind,
+			Reason:        buildRotationReason(c, action),
+			Action:        string(action),
+			ActionDesc:    action.Label(),
+			IsCurrentHold: isInSet(holdSet, c.ETF.Code),
 		})
 	}
 
 	// 同板块去重（可选）：每个 sector 仅保留分数最高的一只，避免 Top5 在同一风险因子上双倍下注。
 	// 默认关闭，对齐聚宽 get_etf_rank（不去重）。如需保留多 Agent 风险分散，把 DedupBySector
 	// 显式设为 true。
+	// 注意：dedupBySector 会保留每个板块第一个出现（即最高分）的标的，可能把"板块同行的持仓"丢掉；
+	// advice 模式持仓应单独保留，所以下面再单独追加被去重掉的持仓（保持其原 Score 与排序）。
 	if a.DedupBySector {
-		scored = dedupBySector(scored)
+		scored = dedupBySectorPreserveHolds(scored, holdSet)
 	}
 
 	top := scored
 	if a.TopN > 0 && len(top) > a.TopN {
-		top = top[:a.TopN]
+		// TopN 截断后，若有持仓被截到外面但仍通过过滤，则按客观分数追加在末尾（不插队、不抬分）
+		head := top[:a.TopN]
+		tail := top[a.TopN:]
+		top = appendHoldsBeyondTop(head, tail, holdSet)
 	}
 
 	// 仅在"实时模式"（AsOf 为零值，即跑当天最新行情）下补全 IOPV / 溢价率，
@@ -207,16 +226,76 @@ func dedupBySector(in []types.ScoredETF) []types.ScoredETF {
 	return out
 }
 
+// dedupBySectorPreserveHolds 在 dedupBySector 基础上保留所有命中持仓的标的：
+//   - 持仓与同板块的非持仓共存：先按"板块首个最高分"去重，再把被丢掉的持仓追加回结果末尾；
+//   - 持仓本身就是板块首个最高分：天然保留；
+//   - 多只同板块持仓：全部保留（分散风险纪律由用户自负）。
+func dedupBySectorPreserveHolds(in []types.ScoredETF, holds map[string]struct{}) []types.ScoredETF {
+	if len(in) == 0 {
+		return in
+	}
+	if len(holds) == 0 {
+		return dedupBySector(in)
+	}
+	dedup := dedupBySector(in)
+	already := make(map[string]struct{}, len(dedup))
+	for _, s := range dedup {
+		already[s.ETF.Code] = struct{}{}
+	}
+	for _, s := range in {
+		if _, isHold := holds[s.ETF.Code]; !isHold {
+			continue
+		}
+		if _, dup := already[s.ETF.Code]; dup {
+			continue
+		}
+		dedup = append(dedup, s)
+		already[s.ETF.Code] = struct{}{}
+	}
+	return dedup
+}
+
+// appendHoldsBeyondTop 当 head 已截断到 TopN 时，把 tail 中命中持仓的标的按客观分数追加进 head。
+// 行为约束：不插队、不重排、不抬分。
+func appendHoldsBeyondTop(head, tail []types.ScoredETF, holds map[string]struct{}) []types.ScoredETF {
+	if len(holds) == 0 || len(tail) == 0 {
+		return head
+	}
+	already := make(map[string]struct{}, len(head))
+	for _, s := range head {
+		already[s.ETF.Code] = struct{}{}
+	}
+	for _, s := range tail {
+		if _, isHold := holds[s.ETF.Code]; !isHold {
+			continue
+		}
+		if _, dup := already[s.ETF.Code]; dup {
+			continue
+		}
+		head = append(head, s)
+		already[s.ETF.Code] = struct{}{}
+	}
+	return head
+}
+
+func isInSet(set map[string]struct{}, key string) bool {
+	if len(set) == 0 {
+		return false
+	}
+	_, ok := set[key]
+	return ok
+}
+
 // 折溢价反向因子阈值（P3-3）：
 //   - PremiumPct ≥ +1.5%：追高警告，Score × 0.95
 //   - PremiumPct ≥ +3.0%：严重过热，Score × 0.85
 //
 // 折价 / 正常溢价不做任何调整（不放大已经折价的标的，避免双重激励）。
 const (
-	premiumPenaltyWarn      = 0.015
-	premiumPenaltyHigh      = 0.030
-	premiumPenaltyMultWarn  = 0.95
-	premiumPenaltyMultHigh  = 0.85
+	premiumPenaltyWarn     = 0.015
+	premiumPenaltyHigh     = 0.030
+	premiumPenaltyMultWarn = 0.95
+	premiumPenaltyMultHigh = 0.85
 )
 
 // applyPremiumPenalty 对 top 列表按 PremiumPct 做 Score 反向调整（in-place）。

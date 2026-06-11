@@ -40,6 +40,11 @@ type ScoredETF struct {
 	Action string `json:"action,omitempty"`
 	// ActionDesc 为 Action 的中文人话描述，方便报告/CLI 展示。
 	ActionDesc string `json:"action_desc,omitempty"`
+	// IsCurrentHold 标记该候选当前是否为用户持仓（advice 模式下由 Screener 注入）。
+	// 仅作为标记用，不参与 Score 计算 / 排序，目的：
+	//   - 让 FinalAgent / 报告能在同一份候选列表里高亮"我持有"的标的；
+	//   - 让 PreOpen / Cooldown 等执行层逻辑能区分加仓与新开仓。
+	IsCurrentHold bool `json:"is_current_hold,omitempty"`
 }
 
 type ScreenerResult struct {
@@ -104,6 +109,25 @@ type FinalDecision struct {
 	ScoreBreakdown map[string]float64 `json:"score_breakdown"`
 	// Picks 投委会精选 1~2 支推荐买入标的（来自 Top5）。
 	Picks []FinalPick `json:"picks,omitempty"`
+	// HoldReviews 针对用户当前持仓的"逐只持仓评审"（advice 模式且 CurrentHolds 非空时输出）。
+	// 客观结合候选评分 + 消息面 + 技术面，给出"继续持有 / 减仓观察 / 平仓切换"三档建议，
+	// 不影响 Recommendation / Picks（避免持仓主观偏差污染主决策）。
+	HoldReviews []HoldReview `json:"hold_reviews,omitempty"`
+}
+
+// HoldReview 单只持仓的客观评审结果（FinalAgent 输出 / 规则版兜底）。
+type HoldReview struct {
+	ETFCode    string  `json:"etf_code"`
+	ETFName    string  `json:"etf_name"`
+	Sector     string  `json:"sector"`
+	InTop      bool    `json:"in_top"`      // 是否进入当日 Top5
+	Rank       int     `json:"rank"`        // 在合并候选列表中的名次（1-based）
+	Score      float64 `json:"score"`       // 候选量化分（与 Top5 同一量纲）
+	Action     string  `json:"action"`      // 客观建议: keep / trim / rotate
+	ActionDesc string  `json:"action_desc"` // 中文人话
+	NewsBias   string  `json:"news_bias"`   // positive / neutral / negative / unknown
+	TechTrend  string  `json:"tech_trend"`  // up / flat / down / unknown
+	Rationale  string  `json:"rationale"`   // 1~3 句客观依据
 }
 
 // FinalPick 投委会精选标的，对应 FinalDecision.Picks 数组中的一项。
@@ -133,11 +157,17 @@ type AgentState struct {
 	TechList []TechnicalAnalysis `json:"tech_list,omitempty"`
 	// Memory 由 MemoryAgent 预生成的长期记忆备忘。
 	Memory *MemorySummary `json:"memory,omitempty"`
-	// CurrentHold 用户当前持仓 ETF 代码，可选；为空时报告中跳过"持仓对照"章节。
-	// 仅本次会话使用，系统不做任何本地持久化。
+	// CurrentHold 用户当前持仓 ETF 代码（取 CurrentHolds[0]，向后兼容旧字段；
+	// 已废弃直接读取，新代码请用 CurrentHolds）。
+	// 为空时报告中跳过"持仓对照"章节。仅本次会话使用，系统不做任何本地持久化。
 	CurrentHold string `json:"current_hold,omitempty"`
-	// HoldAdvice 在 CurrentHold 非空时由 BuildHoldAdvice 计算，包含命中情况与建议。
+	// CurrentHolds 用户当前持仓 ETF 代码列表（advice 模式可填多个），上游通过 --current-hold a,b,c 传入。
+	// 仅本次会话使用，系统不做任何本地持久化；为空切片时与未提供持仓等价。
+	CurrentHolds []string `json:"current_holds,omitempty"`
+	// HoldAdvice 在 CurrentHold 非空时由 BuildHoldAdvice 计算（取首个持仓），向后兼容旧报告。
 	HoldAdvice *HoldAdvice `json:"hold_advice,omitempty"`
+	// HoldAdvices 多持仓对应的逐只对照建议；CurrentHolds 为空时为 nil。
+	HoldAdvices []HoldAdvice `json:"hold_advices,omitempty"`
 }
 
 // MemorySummary 由 MemoryAgent 输出，注入 FinalAgent 的长期记忆备忘。
@@ -207,9 +237,11 @@ type PreOpenSnapshot struct {
 type PreOpenAnalysis struct {
 	BaseReportPath string            `json:"base_report_path"`
 	GeneratedAt    time.Time         `json:"generated_at"`
-	Market         PreOpenSnapshot   `json:"market"`      // 510300 大盘
-	MarketBias     string            `json:"market_bias"` // strong_up / weak_up / flat / weak_down / strong_down
-	Snapshots      []PreOpenSnapshot `json:"snapshots"`   // Final + Picks 合并去重
+	CurrentHold    string            `json:"current_hold,omitempty"`  // 兼容旧字段，等价于 CurrentHolds[0]
+	CurrentHolds   []string          `json:"current_holds,omitempty"` // 当前已持有 ETF 列表；用于区分加仓与新开仓
+	Market         PreOpenSnapshot   `json:"market"`                  // 510300 大盘
+	MarketBias     string            `json:"market_bias"`             // strong_up / weak_up / flat / weak_down / strong_down
+	Snapshots      []PreOpenSnapshot `json:"snapshots"`               // Final + Picks 合并去重
 	Summary        string            `json:"summary"`
 	FinalAction    string            `json:"final_action"`
 }

@@ -30,11 +30,14 @@ const preOpenSystemPrompt = `你是一名 A 股盘前撮合复核员。8:50 主�
 【输入】
 - market: 510300 大盘集合竞价快照（auction_price / iopv / premium_pct / gap_pct）
 - snapshots: 待复核 ETF 列表，每只含 prev_close / auction_price / iopv / premium_pct / gap_pct / entry_price / entry_gap_pct + 规则版初判 verdict + 调整后价位
+- current_holds: 当前已持有 ETF 代码列表；若 snapshots 命中其中任一代码，低开只能提示观察/不加仓，不能直接 chase
 
 【判定规则（你必须遵守）】
 - premium_pct ≥ +2%   → verdict=abandon （高溢价，回归净值风险大，无视跳空方向）
 - entry_gap_pct > +1.5% → verdict=wait_pullback （高开追入风险大，建议等回踩，adj_entry 上抬到 entry × 1.005）
-- entry_gap_pct < -1%   → verdict=chase （低开折价机会，adj_entry = auction_price）
+- entry_gap_pct < -1% 且命中 current_holds → verdict=wait_pullback（已有持仓低开不加仓，adj_entry=0）
+- entry_gap_pct < -1% 且 market.gap_pct >= -0.3%、premium_pct <= +0.5%、gap_pct > -0.8% → verdict=chase（空仓折价机会）
+- entry_gap_pct < -1% 但大盘/个股弱开 → verdict=wait_pullback（低开可能是弱势延续，不追）
 - 其余                  → verdict=on_target （维持原入场价/止损/止盈）
 - 大盘 market.gap_pct < -0.8% 时，对所有标的 verdict 至少不弱于 wait_pullback（不主动追涨）；
   大盘 market.gap_pct > +0.8% 时，可对 on_target 标的略微上抬 adj_entry（不超过 entry × 1.003）。
@@ -74,6 +77,15 @@ func (a *PreOpenAgent) Run(ctx context.Context, state *types.AgentState) (*types
 	}
 
 	out := &types.PreOpenAnalysis{GeneratedAt: time.Now()}
+	holds := normalizePreOpenHolds(state)
+	out.CurrentHolds = holds
+	if len(holds) > 0 {
+		out.CurrentHold = holds[0]
+	}
+	holdSet := make(map[string]struct{}, len(holds))
+	for _, h := range holds {
+		holdSet[h] = struct{}{}
+	}
 
 	// 1) 大盘 510300 撮合
 	out.Market = fetchPreOpenSnapshot(rq, "510300", "沪深300ETF", 0)
@@ -115,7 +127,7 @@ func (a *PreOpenAgent) Run(ctx context.Context, state *types.AgentState) (*types
 		snap.AdjStopLoss = stops[code]
 		snap.AdjTakeProf = takes[code]
 		snap.AdjEntry = entries[code]
-		applyVerdictRule(&snap, out.Market.GapPct)
+		applyVerdictRule(&snap, out.Market.GapPct, holdSet)
 		out.Snapshots = append(out.Snapshots, snap)
 	}
 
@@ -129,6 +141,35 @@ func (a *PreOpenAgent) Run(ctx context.Context, state *types.AgentState) (*types
 	}
 
 	return out, nil
+}
+
+// normalizePreOpenHolds 把 state.CurrentHolds 与旧 CurrentHold 字段合并、去空白、去重保序。
+// 兼容老报告 JSON sidecar 仅写了 CurrentHold 单值字段的场景。
+func normalizePreOpenHolds(state *types.AgentState) []string {
+	if state == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(state.CurrentHolds)+1)
+	push := func(c string) {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			return
+		}
+		if _, dup := seen[c]; dup {
+			return
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	for _, h := range state.CurrentHolds {
+		push(h)
+	}
+	push(state.CurrentHold)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // fetchPreOpenSnapshot 拉单只标的的集合竞价快照；失败时仍返回 ETFCode/Name 占位。
@@ -172,7 +213,12 @@ func classifyMarketBias(gap float64) string {
 }
 
 // applyVerdictRule 规则版初判 + 调整后入场价。
-func applyVerdictRule(s *types.PreOpenSnapshot, marketGap float64) {
+// holds 为当前持仓代码集合（多持仓）；命中其一则按"已持仓"路径处理。
+func applyVerdictRule(s *types.PreOpenSnapshot, marketGap float64, holds map[string]struct{}) {
+	isHolding := false
+	if len(holds) > 0 {
+		_, isHolding = holds[s.ETFCode]
+	}
 	switch {
 	case s.PremiumPct >= 0.02:
 		s.Verdict = "abandon"
@@ -184,22 +230,49 @@ func applyVerdictRule(s *types.PreOpenSnapshot, marketGap float64) {
 			s.AdjEntry = s.EntryPrice * 1.005
 		}
 		s.Note = fmt.Sprintf("跳空%+.2f%%, 等回踩", s.EntryGapPct*100)
+	case s.EntryGapPct < -0.01 && isHolding:
+		s.Verdict = "wait_pullback"
+		s.AdjEntry = 0
+		s.Note = fmt.Sprintf("已持有低开%+.2f%%, 不加仓", s.EntryGapPct*100)
 	case s.EntryGapPct < -0.01:
-		s.Verdict = "chase"
-		s.AdjEntry = s.AuctionPrice
-		s.Note = fmt.Sprintf("低开%+.2f%%, 折价介入", s.EntryGapPct*100)
+		if marketGap >= -0.003 && s.PremiumPct <= 0.005 && s.GapPct > -0.008 {
+			s.Verdict = "chase"
+			s.AdjEntry = s.AuctionPrice
+			s.Note = fmt.Sprintf("低开%+.2f%%, 折价介入", s.EntryGapPct*100)
+		} else {
+			s.Verdict = "wait_pullback"
+			s.AdjEntry = 0
+			s.Note = fmt.Sprintf("低开%+.2f%%, 弱势不追", s.EntryGapPct*100)
+		}
 	default:
 		s.Verdict = "on_target"
 		s.Note = "符合 8:50 入场区间"
 	}
 
 	// 大盘弱势时，on_target 标的不再主动追，至少 wait_pullback
-	if marketGap <= -0.008 && s.Verdict == "on_target" {
+	if marketGap <= -0.008 && (s.Verdict == "on_target" || s.Verdict == "chase") {
 		s.Verdict = "wait_pullback"
 		if s.EntryPrice > 0 {
 			s.AdjEntry = s.EntryPrice * 0.998
 		}
+		if isHolding {
+			s.AdjEntry = 0
+		}
 		s.Note = "大盘弱势, 等回落"
+	}
+
+	// 盈亏比只在集合竞价执行层做硬拦截：不影响主信号是否持有，只影响是否追入/加仓。
+	if s.Verdict == "chase" || s.Verdict == "on_target" {
+		if _, note := CapByRiskReward("buy", s.AdjEntry, s.AdjStopLoss, s.AdjTakeProf); note != "" {
+			s.Verdict = "wait_pullback"
+			if isHolding {
+				s.AdjEntry = 0
+				s.Note = "盈亏比不足, 不加仓"
+			} else {
+				s.AdjEntry = 0
+				s.Note = "盈亏比不足, 暂不追"
+			}
+		}
 	}
 }
 
@@ -246,12 +319,12 @@ func ruleBasedFinalAction(a *types.PreOpenAnalysis) string {
 type llmPreOpenResponse struct {
 	MarketBias string `json:"market_bias"`
 	Snapshots  []struct {
-		ETFCode      string  `json:"etf_code"`
-		Verdict      string  `json:"verdict"`
-		AdjEntry     float64 `json:"adj_entry"`
-		AdjStopLoss  float64 `json:"adj_stop_loss"`
-		AdjTakeProf  float64 `json:"adj_take_profit"`
-		Note         string  `json:"note"`
+		ETFCode     string  `json:"etf_code"`
+		Verdict     string  `json:"verdict"`
+		AdjEntry    float64 `json:"adj_entry"`
+		AdjStopLoss float64 `json:"adj_stop_loss"`
+		AdjTakeProf float64 `json:"adj_take_profit"`
+		Note        string  `json:"note"`
 	} `json:"snapshots"`
 	Summary     string `json:"summary"`
 	FinalAction string `json:"final_action"`
@@ -308,6 +381,9 @@ func buildPreOpenUserPrompt(a *types.PreOpenAnalysis) string {
 	sb.WriteString(fmt.Sprintf("市场基准 510300: prev_close=%.4f auction=%.4f iopv=%.4f premium=%+.2f%% gap=%+.2f%% (规则判定 market_bias=%s)\n\n",
 		a.Market.PrevClose, a.Market.AuctionPrice, a.Market.IOPV,
 		a.Market.PremiumPct*100, a.Market.GapPct*100, a.MarketBias))
+	if len(a.CurrentHolds) > 0 {
+		sb.WriteString("当前持仓 (current_holds): " + strings.Join(a.CurrentHolds, ",") + "\n\n")
+	}
 	sb.WriteString("[待复核标的]\n")
 	for _, s := range a.Snapshots {
 		sb.WriteString(fmt.Sprintf(

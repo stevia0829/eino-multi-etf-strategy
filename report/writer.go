@@ -67,7 +67,8 @@ func BuildMarkdown(s *types.AgentState, now time.Time) string {
 	writeMoneyFlow(&b, s.MoneyFlow) // §x 资金流向
 	writeScreener(&b, s.Screener)
 	writeFinal(&b, s.Final) // §n 综合加权评分
-	writeHoldAdvice(&b, s)  // §last 持仓对照（CurrentHold 为空时跳过）
+	writeHoldAdvice(&b, s)  // §last-1 持仓对照（CurrentHolds 为空时跳过）
+	writeHoldReviews(&b, s) // §last 持仓评审（HoldReviews 为空时跳过）
 
 	b.WriteString("\n---\n")
 	b.WriteString("> ⚠️ 本报告由多 Agent + LLM 自动生成，仅供研究参考，不构成投资建议。\n")
@@ -222,8 +223,12 @@ func writeScreener(b *strings.Builder, sc *types.ScreenerResult) {
 			if e.ETF.IOPV > 0 {
 				premium = formatPremium(e.ETF.PremiumPct)
 			}
+			name := e.ETF.Name
+			if e.IsCurrentHold {
+				name = "🟦 " + name
+			}
 			b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %.3f | %s | %.2f | %s | %s |\n",
-				i+1, e.ETF.Name, e.ETF.Code, e.ETF.Sector, e.ETF.Price, premium, e.Score, action, e.Reason))
+				i+1, name, e.ETF.Code, e.ETF.Sector, e.ETF.Price, premium, e.Score, action, e.Reason))
 		}
 	} else {
 		b.WriteString("| 排名 | 名称 | 代码 | 板块 | 现价 | 综合分 | 动量动作 | 入选理由 |\n")
@@ -233,8 +238,12 @@ func writeScreener(b *strings.Builder, sc *types.ScreenerResult) {
 			if action == "" {
 				action = e.Action
 			}
+			name := e.ETF.Name
+			if e.IsCurrentHold {
+				name = "🟦 " + name
+			}
 			b.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %.3f | %.2f | %s | %s |\n",
-				i+1, e.ETF.Name, e.ETF.Code, e.ETF.Sector, e.ETF.Price, e.Score, action, e.Reason))
+				i+1, name, e.ETF.Code, e.ETF.Sector, e.ETF.Price, e.Score, action, e.Reason))
 		}
 	}
 	b.WriteString("\n")
@@ -324,29 +333,77 @@ func writeMoneyFlow(b *strings.Builder, m *types.MoneyFlowAnalysis) {
 	b.WriteString("> 备注：本节为基于量价行为推导的代理估算，非真实北向 / 申赎数据，仅作辅助参考。\n\n")
 }
 
-// writeHoldAdvice 当用户提供 CurrentHold 时输出持仓对照章节；为空则整段跳过。
+// writeHoldAdvice 当用户提供 CurrentHold(s) 时输出持仓对照章节；为空则整段跳过。
+// 多持仓模式：依次列出每只持仓的对照建议；兼容旧 HoldAdvice 单值字段。
 func writeHoldAdvice(b *strings.Builder, s *types.AgentState) {
-	if s == nil || s.CurrentHold == "" || s.HoldAdvice == nil {
+	if s == nil {
 		return
 	}
-	a := s.HoldAdvice
+	advices := s.HoldAdvices
+	if len(advices) == 0 && s.HoldAdvice != nil {
+		advices = []types.HoldAdvice{*s.HoldAdvice}
+	}
+	if len(advices) == 0 {
+		return
+	}
 	b.WriteString("## 九、与您当前持仓的对照\n\n")
-	b.WriteString(fmt.Sprintf("- 当前持仓代码：`%s`\n", a.CurrentHold))
-	if a.HitTop {
-		b.WriteString(fmt.Sprintf("- 命中 Top5：✅ 第 **%d** 名（%s）\n", a.Rank, a.HitName))
-		if a.ActionDesc != "" {
-			b.WriteString(fmt.Sprintf("- 动量动作：**%s**\n", a.ActionDesc))
-		} else if a.Action != "" {
-			b.WriteString(fmt.Sprintf("- 动量动作：**%s**\n", a.Action))
+	bestCode, bestName := "", ""
+	for i, a := range advices {
+		if i == 0 {
+			bestCode, bestName = a.BestCode, a.BestName
 		}
-	} else {
-		b.WriteString("- 命中 Top5：❌ 未进入候选\n")
+		b.WriteString(fmt.Sprintf("### 持仓 %d：`%s`\n\n", i+1, a.CurrentHold))
+		if a.HitTop {
+			b.WriteString(fmt.Sprintf("- 命中 Top5：✅ 第 **%d** 名（%s）\n", a.Rank, a.HitName))
+			if a.ActionDesc != "" {
+				b.WriteString(fmt.Sprintf("- 动量动作：**%s**\n", a.ActionDesc))
+			} else if a.Action != "" {
+				b.WriteString(fmt.Sprintf("- 动量动作：**%s**\n", a.Action))
+			}
+		} else {
+			b.WriteString("- 命中 Top5：❌ 未进入候选\n")
+		}
+		if a.Suggestion != "" {
+			b.WriteString("\n> " + indentQuote(a.Suggestion) + "\n\n")
+		}
 	}
-	if a.BestCode != "" {
-		b.WriteString(fmt.Sprintf("- 当日策略 Top1：%s(`%s`)\n", a.BestName, a.BestCode))
-	}
-	if a.Suggestion != "" {
-		b.WriteString("\n**建议**\n\n> " + indentQuote(a.Suggestion) + "\n\n")
+	if bestCode != "" {
+		b.WriteString(fmt.Sprintf("- 当日策略 Top1：%s(`%s`)\n\n", bestName, bestCode))
 	}
 	b.WriteString("> 提示：本系统不会保存您的任何持仓信息，`--current-hold` 仅在本次会话使用。\n\n")
+}
+
+// writeHoldReviews 输出 FinalAgent 给出的"逐只持仓客观评审"（keep / trim / rotate）。
+// 与 writeHoldAdvice 的差异：HoldAdvice 仅基于动量名次给出；HoldReview 结合 score / news / tech
+// 给出更立体的评审，是"持仓维度的最终决策"，但不影响主决策的 recommendation / picks。
+func writeHoldReviews(b *strings.Builder, s *types.AgentState) {
+	if s == nil || s.Final == nil || len(s.Final.HoldReviews) == 0 {
+		return
+	}
+	b.WriteString("## 十、当前持仓客观评审 (FinalAgent · HoldReviews)\n\n")
+	b.WriteString("| 名称 | 代码 | 板块 | 名次 | 量化分 | 消息面 | 技术趋势 | 建议 |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	for _, r := range s.Final.HoldReviews {
+		rank := "外"
+		if r.InTop {
+			rank = fmt.Sprintf("Top%d", r.Rank)
+		} else if r.Rank > 0 {
+			rank = fmt.Sprintf("第%d", r.Rank)
+		}
+		desc := r.ActionDesc
+		if desc == "" {
+			desc = r.Action
+		}
+		b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %s | %.2f | %s | %s | **`%s`**（%s） |\n",
+			r.ETFName, r.ETFCode, r.Sector, rank, r.Score, r.NewsBias, r.TechTrend, r.Action, desc))
+	}
+	b.WriteString("\n")
+	for _, r := range s.Final.HoldReviews {
+		if strings.TrimSpace(r.Rationale) == "" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("- **%s(`%s`)**：%s\n", r.ETFName, r.ETFCode, r.Rationale))
+	}
+	b.WriteString("\n> 备注：HoldReviews 仅评审您当前持仓，不影响上方的 recommendation / picks / 价格方案；")
+	b.WriteString("是否调仓需结合您自己的成本与税费综合判断。\n\n")
 }

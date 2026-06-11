@@ -133,6 +133,21 @@ const finalSystemPrompt = `你是一名拥有 20 年实战经验的"首席投资
       "take_profit": 数字,
       "rationale": "60~120 字：解释为什么是它而不是其他 4 支，必须显式对比 news_list / tech_list 的关键差异"
     }
+  ],
+  "hold_reviews": [
+    {
+      "etf_code": "6位代码（必须出自用户输入的 current_holds）",
+      "etf_name": "中文名",
+      "sector": "板块",
+      "in_top": true/false,
+      "rank": 1-based 在合并候选列表的名次,
+      "score": 候选量化分,
+      "action": "keep | trim | rotate",
+      "action_desc": "中文人话（如：继续持有 / 减仓观察 / 平仓切换）",
+      "news_bias": "positive | neutral | negative | unknown",
+      "tech_trend": "up | flat | down | unknown",
+      "rationale": "60~140 字：结合 news_list / tech_list / score 三方面给出客观依据"
+    }
   ]
 }
 约束：
@@ -145,7 +160,15 @@ const finalSystemPrompt = `你是一名拥有 20 年实战经验的"首席投资
   · 第 1 支默认就是当前 best（target），但 rationale 必须给出"它在 Top5 中胜出的具体理由"；
   · 第 2 支为可选的"备选 / 分散仓位"标的，板块或风格应与第 1 支有差异（避免双倍下注同一风险因子）；
   · 若 Top5 中除 best 外没有任何标的同时满足 trend != down 且 sentiment != negative，
-    可仅返回 1 支 pick，不要凑数。`
+    可仅返回 1 支 pick，不要凑数。
+- hold_reviews 仅在用户输入的 current_holds 非空时返回；为空时输出 [] 即可。
+  · 必须为 current_holds 中"在 screener.top5 中能匹配到候选的"每只持仓输出一项；
+  · 不得把 hold_reviews 与 picks 混淆：hold_reviews 是"对持仓的客观评审"，与是否买入新标的无关；
+  · keep = 信号还在 + 趋势/消息至少不背离，建议继续持有；
+    trim = 信号弱化或消息中性偏弱，建议减仓观望，保留少量底仓；
+    rotate = 信号反转 / 趋势 down / 消息 negative / 量化分明显落后 best，建议平仓切换；
+  · rationale 必须显式引用：候选量化分（绝对 + 与 best 的差距）+ news_list 中匹配项的 sentiment + tech_list 中匹配项的 trend；
+  · 严禁让 hold_reviews 改变 recommendation / picks / 价格方案。`
 
 func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.FinalDecision, error) {
 	if st.Screener == nil || len(st.Screener.Top5) == 0 {
@@ -186,6 +209,9 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 		},
 		"factor_relevance_note": relevance,
 		"memory":                st.Memory, // 长期记忆备忘（由 MemoryAgent 预生成）
+		// 持仓评审输入（advice 模式注入；为空时 LLM 应输出 hold_reviews=[]）
+		"current_holds":   collectHoldsList(st),
+		"hold_candidates": holdCandidatesPayload(st),
 	}, "", "  ")
 	user := fmt.Sprintf("以下是 6 个子 Agent 的输入 + Top5 候选 + News/Tech 批量分析 + 板块自适应权重 + 因子相关性提示 + 长期记忆备忘，请输出最终决策（含 picks 1~2 支）：\n%s", string(payload))
 
@@ -231,6 +257,19 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 	if dec.TakeProfit == 0 {
 		dec.TakeProfit = defaultTakeProfit(target)
 	}
+	if capped, note := CapByPullbackCooldownForState(dec.Recommendation, target, st); note != "" {
+		dec.Recommendation = capped
+		if dec.Reasoning != "" {
+			dec.Reasoning += " "
+		}
+		dec.Reasoning += "【回撤冷却】" + note + "。"
+	}
+	if _, note := CapByRiskReward(dec.Recommendation, dec.EntryPrice, dec.StopLoss, dec.TakeProfit); note != "" {
+		if dec.Reasoning != "" {
+			dec.Reasoning += " "
+		}
+		dec.Reasoning += "【盈亏比提示】" + note + "。"
+	}
 	dec.TargetETF = target
 	dec.NewsAnalysis = deref(st.News)
 	dec.GlobalAnalysis = derefG(st.Global)
@@ -242,6 +281,12 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 		dec.Picks = fallbackPicks(st, dec)
 	} else {
 		dec.Picks = sanitizePicks(dec.Picks, st, dec)
+	}
+	// HoldReviews：LLM 未返回 / 缺字段时按规则兜底；有返回则做 sanitize 校验。
+	if len(dec.HoldReviews) == 0 {
+		dec.HoldReviews = buildHoldReviewsFallback(st)
+	} else {
+		dec.HoldReviews = sanitizeHoldReviews(dec.HoldReviews, st)
 	}
 	return dec, nil
 }
@@ -261,9 +306,18 @@ func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 		dec.Recommendation = capped
 		premiumNote = note
 	}
+	cooldownNote := ""
+	if capped, note := CapByPullbackCooldownForState(dec.Recommendation, target, st); note != "" {
+		dec.Recommendation = capped
+		cooldownNote = note
+	}
 	dec.EntryPrice = target.ETF.Price
 	dec.StopLoss = defaultStopLoss(target)
 	dec.TakeProfit = defaultTakeProfit(target)
+	rrNote := ""
+	if _, note := CapByRiskReward(dec.Recommendation, dec.EntryPrice, dec.StopLoss, dec.TakeProfit); note != "" {
+		rrNote = note
+	}
 	dec.ScoreBreakdown = scoreBreakdown(st)
 	w := WeightsForSector(target.ETF.Sector)
 	premiumDesc := ""
@@ -283,8 +337,17 @@ func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 	if premiumNote != "" {
 		dec.Reasoning += " 【溢价风险】" + premiumNote + "。"
 	}
+	if cooldownNote != "" {
+		dec.Reasoning += " 【回撤冷却】" + cooldownNote + "。"
+	}
+	if rrNote != "" {
+		dec.Reasoning += " 【盈亏比提示】" + rrNote + "。"
+	}
 	if len(dec.Picks) == 0 {
 		dec.Picks = fallbackPicks(st, dec)
+	}
+	if len(dec.HoldReviews) == 0 {
+		dec.HoldReviews = buildHoldReviewsFallback(st)
 	}
 }
 
@@ -346,6 +409,26 @@ func defaultTakeProfit(target types.ScoredETF) float64 {
 	return target.ETF.Price * 1.05
 }
 
+const minExecutableRiskReward = 1.4
+
+// CapByRiskReward 检查交易计划的最小盈亏比，只返回风险提示，不改变 recommendation。
+// 亏损端用 entry-stop，收益端用 take-entry；低于阈值说明即便方向看对，
+// 单笔交易也没有足够安全边际。是否拦截追入/加仓由 PreOpenAgent 在集合竞价阶段决定。
+func CapByRiskReward(reco string, entry, stop, take float64) (string, string) {
+	if reco != "strong_buy" && reco != "buy" {
+		return reco, ""
+	}
+	if entry <= 0 || stop <= 0 || take <= 0 || stop >= entry || take <= entry {
+		return reco, "入场/止损/止盈结构无效，需等待更好价格或重新计算交易计划"
+	}
+	rr := (take - entry) / (entry - stop)
+	if rr < minExecutableRiskReward {
+		return reco, fmt.Sprintf("当前盈亏比 %.2f < %.2f，安全边际不足，集合竞价追入/加仓需等待更好价格",
+			rr, minExecutableRiskReward)
+	}
+	return reco, ""
+}
+
 func clamp(v, lo, hi float64) float64 {
 	if v < lo {
 		return lo
@@ -378,6 +461,139 @@ func ruleRecommend(s float64) string {
 	default:
 		return "avoid"
 	}
+}
+
+const (
+	pullbackCooldownLookback = 5
+	pullbackCooldownTrigger  = 0.05
+)
+
+// CapByPullbackCooldown 在强动量标的短线急跌且尚未修复时，把新开仓建议降为 hold。
+// 规则：
+//   - 最近 5 日高点回撤 ≥ 5%；
+//   - 当前价尚未重新站上 MA5；
+//   - 若最近一根 K 线是阴线，当前价也未收复该阴线实体的一半。
+//
+// 这条规则主要约束"空仓新追"，防止 advice 连续几天吃到强动量尾巴后仍反复提示买入。
+func CapByPullbackCooldown(reco string, target types.ScoredETF) (string, string) {
+	if reco != "strong_buy" && reco != "buy" {
+		return reco, ""
+	}
+	note := PullbackCooldownNote(target)
+	if note == "" {
+		return reco, ""
+	}
+	return "hold", fmt.Sprintf("%s，新开仓由 %s 降为 hold", note, reco)
+}
+
+// CapByPullbackCooldownForState 按持仓状态输出短线回撤提示，但不硬降档。
+// 主策略保持信号在线即持有/换仓，避免回撤冷却误伤收益；加仓拦截交给 PreOpenAgent。
+// 多持仓场景下，命中"换仓目标本身就是当前持仓之一"会按"已持有同一标的"处理。
+func CapByPullbackCooldownForState(reco string, target types.ScoredETF, st *types.AgentState) (string, string) {
+	if reco != "strong_buy" && reco != "buy" {
+		return reco, ""
+	}
+	note := PullbackCooldownNote(target)
+	if note == "" {
+		return reco, ""
+	}
+	holds := collectHolds(st)
+	if len(holds) == 0 {
+		return reco, note + "，未提供当前持仓，不降档，仅提示谨慎追高"
+	}
+	if _, hit := holds[target.ETF.Code]; hit {
+		return reco, note + "，当前已持有同一标的，不降档，仅提示谨慎加仓"
+	}
+	return reco, note + "，换仓目标短线未修复，不降档，仅提示降低追入优先级"
+}
+
+// collectHolds 把 AgentState 中的多持仓 + 兼容的单字段持仓合并成 set。
+func collectHolds(st *types.AgentState) map[string]struct{} {
+	if st == nil {
+		return nil
+	}
+	out := make(map[string]struct{}, len(st.CurrentHolds)+1)
+	for _, h := range st.CurrentHolds {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			out[h] = struct{}{}
+		}
+	}
+	if h := strings.TrimSpace(st.CurrentHold); h != "" {
+		out[h] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func PullbackCooldownNote(target types.ScoredETF) string {
+	klines := target.ETF.History
+	if len(klines) < pullbackCooldownLookback {
+		return ""
+	}
+	price := target.ETF.Price
+	if price <= 0 {
+		price = klines[len(klines)-1].Close
+	}
+	if price <= 0 {
+		return ""
+	}
+
+	start := len(klines) - pullbackCooldownLookback
+	high := 0.0
+	for _, k := range klines[start:] {
+		if k.High > high {
+			high = k.High
+		}
+		if k.Close > high {
+			high = k.Close
+		}
+	}
+	if high <= 0 {
+		return ""
+	}
+	pullback := (high - price) / high
+	if pullback < pullbackCooldownTrigger {
+		return ""
+	}
+
+	ma5 := target.Indicators["MA5"]
+	if ma5 <= 0 {
+		ma5 = avgClose(klines, 5)
+	}
+	reclaimedMA5 := ma5 > 0 && price >= ma5
+	reclaimedPrevHalf := reclaimedLastBearHalf(klines, price)
+	if reclaimedMA5 || reclaimedPrevHalf {
+		return ""
+	}
+	return fmt.Sprintf("近%d日高点回撤 %.2f%%，且未收复 MA5 / 最近阴线半分位",
+		pullbackCooldownLookback, pullback*100)
+}
+
+func avgClose(klines []types.KLine, n int) float64 {
+	if n <= 0 || len(klines) < n {
+		return 0
+	}
+	start := len(klines) - n
+	sum := 0.0
+	for _, k := range klines[start:] {
+		sum += k.Close
+	}
+	return sum / float64(n)
+}
+
+func reclaimedLastBearHalf(klines []types.KLine, price float64) bool {
+	if len(klines) < 1 {
+		return false
+	}
+	last := klines[len(klines)-1]
+	if last.Open <= last.Close {
+		return false
+	}
+	half := last.Close + (last.Open-last.Close)*0.5
+	return price >= half
 }
 
 func deref(n *types.NewsAnalysis) types.NewsAnalysis {
@@ -614,6 +830,11 @@ func buildAltPick(e types.ScoredETF, n types.NewsAnalysis, t types.TechnicalAnal
 	if capped, _ := CapByPremium(rec, e.ETF.PremiumPct); capped != "" {
 		rec = capped
 	}
+	riskNotes := []string{}
+	if capped, note := CapByPullbackCooldown(rec, e); note != "" {
+		rec = capped
+		riskNotes = append(riskNotes, "回撤冷却："+note)
+	}
 	rationale := fmt.Sprintf(
 		"备选标的：板块=%s，量化%.1f（%s），与 Top1 板块分散；",
 		e.ETF.Sector, e.Score, e.ActionDesc,
@@ -626,6 +847,12 @@ func buildAltPick(e types.ScoredETF, n types.NewsAnalysis, t types.TechnicalAnal
 	}
 	stop := defaultStopLoss(e)
 	take := defaultTakeProfit(e)
+	if _, note := CapByRiskReward(rec, e.ETF.Price, stop, take); note != "" {
+		riskNotes = append(riskNotes, "盈亏比提示："+note)
+	}
+	if len(riskNotes) > 0 {
+		rationale += strings.Join(riskNotes, "；") + "。"
+	}
 	return types.FinalPick{
 		ETFCode:        e.ETF.Code,
 		ETFName:        e.ETF.Name,
@@ -672,11 +899,25 @@ func sanitizePicks(picks []types.FinalPick, st *types.AgentState, dec *types.Fin
 		if p.TakeProfit == 0 {
 			p.TakeProfit = defaultTakeProfit(e)
 		}
-		if p.Recommendation == "" {
-			if e.ETF.Code == dec.TargetETF.ETF.Code {
+		if e.ETF.Code == dec.TargetETF.ETF.Code {
+			if p.Recommendation != dec.Recommendation {
 				p.Recommendation = dec.Recommendation
-			} else {
+				p.Rationale = appendPickRiskNote(p.Rationale, "与最终建议同步为 "+dec.Recommendation)
+			}
+		} else {
+			if p.Recommendation == "" {
 				p.Recommendation = "hold"
+			}
+			if capped, note := CapByPremium(p.Recommendation, e.ETF.PremiumPct); note != "" {
+				p.Recommendation = capped
+				p.Rationale = appendPickRiskNote(p.Rationale, "溢价风险："+note)
+			}
+			if capped, note := CapByPullbackCooldown(p.Recommendation, e); note != "" {
+				p.Recommendation = capped
+				p.Rationale = appendPickRiskNote(p.Rationale, "回撤冷却："+note)
+			}
+			if _, note := CapByRiskReward(p.Recommendation, p.EntryPrice, p.StopLoss, p.TakeProfit); note != "" {
+				p.Rationale = appendPickRiskNote(p.Rationale, "盈亏比提示："+note)
 			}
 		}
 		if p.Conviction == 0 {
@@ -691,4 +932,349 @@ func sanitizePicks(picks []types.FinalPick, st *types.AgentState, dec *types.Fin
 		return fallbackPicks(st, dec)
 	}
 	return out
+}
+
+func appendPickRiskNote(rationale, note string) string {
+	if note == "" {
+		return rationale
+	}
+	if rationale != "" && !strings.HasSuffix(rationale, "。") && !strings.HasSuffix(rationale, "；") {
+		rationale += "。"
+	}
+	return rationale + "【风险过滤】" + note + "。"
+}
+
+// ============== 持仓评审 (HoldReviews) ==============
+
+// collectHoldsList 把 collectHolds 的 set 还原为去重保序的 slice，便于注入 LLM payload。
+func collectHoldsList(st *types.AgentState) []string {
+	if st == nil {
+		return nil
+	}
+	out := make([]string, 0, len(st.CurrentHolds)+1)
+	seen := make(map[string]struct{}, len(st.CurrentHolds)+1)
+	push := func(c string) {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			return
+		}
+		if _, dup := seen[c]; dup {
+			return
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	for _, h := range st.CurrentHolds {
+		push(h)
+	}
+	push(st.CurrentHold)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// holdCandidatesPayload 构造每只持仓在合并候选列表中的对应记录，供 LLM 在 hold_reviews 中
+// 引用客观分数 / 名次 / news_list / tech_list。命中 Top5 / 持仓豁免位的标的才会出现；
+// 完全在候选外的持仓（连 Strategy3Pool 都未命中或被过滤）按用户决策"忽略，不强制评估"处理。
+func holdCandidatesPayload(st *types.AgentState) []map[string]interface{} {
+	if st == nil || st.Screener == nil {
+		return nil
+	}
+	holds := collectHolds(st)
+	if len(holds) == 0 {
+		return nil
+	}
+	newsByCode := map[string]types.NewsAnalysis{}
+	for _, n := range st.NewsList {
+		if n.ETFCode != "" {
+			newsByCode[n.ETFCode] = n
+		}
+	}
+	techByCode := map[string]types.TechnicalAnalysis{}
+	for _, t := range st.TechList {
+		if t.ETFCode != "" {
+			techByCode[t.ETFCode] = t
+		}
+	}
+	bestScore := 0.0
+	if len(st.Screener.Top5) > 0 {
+		bestScore = st.Screener.Top5[0].Score
+	}
+	out := make([]map[string]interface{}, 0, len(holds))
+	for i, e := range st.Screener.Top5 {
+		if _, ok := holds[e.ETF.Code]; !ok {
+			continue
+		}
+		row := map[string]interface{}{
+			"etf_code":     e.ETF.Code,
+			"etf_name":     e.ETF.Name,
+			"sector":       e.ETF.Sector,
+			"rank":         i + 1,
+			"score":        e.Score,
+			"score_gap":    bestScore - e.Score,
+			"action":       e.Action,
+			"action_desc":  e.ActionDesc,
+			"is_top5":      i < 5,
+			"premium_pct":  e.ETF.PremiumPct,
+			"premium_risk": PremiumRiskLabel(e.ETF.PremiumPct),
+		}
+		if n, ok := newsByCode[e.ETF.Code]; ok {
+			row["news_sentiment"] = n.Sentiment
+			row["news_score"] = n.Score
+			row["news_summary"] = n.Summary
+		}
+		if t, ok := techByCode[e.ETF.Code]; ok {
+			row["tech_trend"] = t.Trend
+			row["tech_score"] = t.Score
+			row["tech_summary"] = t.Summary
+		}
+		out = append(out, row)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// buildHoldReviewsFallback 规则版持仓评审：基于排名命中 + news/tech 客观信号映射 keep/trim/rotate。
+//   - 未命中候选（持仓不在 Top5 / 豁免位）：忽略，不出条目（与"忽略池外标的"决策一致）；
+//   - rotate：动作 = avoid 或 趋势=down 或 消息=negative 或 (与 best 分差 ≥ 15 且不在 Top3)；
+//   - trim：动作 = hold_only / 趋势=flat / 消息=neutral；
+//   - keep：动作 ∈ {strong_buy, buy} 且无负向信号。
+func buildHoldReviewsFallback(st *types.AgentState) []types.HoldReview {
+	if st == nil || st.Screener == nil || len(st.Screener.Top5) == 0 {
+		return nil
+	}
+	holds := collectHolds(st)
+	if len(holds) == 0 {
+		return nil
+	}
+	newsByCode := map[string]types.NewsAnalysis{}
+	for _, n := range st.NewsList {
+		if n.ETFCode != "" {
+			newsByCode[n.ETFCode] = n
+		}
+	}
+	techByCode := map[string]types.TechnicalAnalysis{}
+	for _, t := range st.TechList {
+		if t.ETFCode != "" {
+			techByCode[t.ETFCode] = t
+		}
+	}
+	bestScore := st.Screener.Top5[0].Score
+	out := make([]types.HoldReview, 0, len(holds))
+	for i, e := range st.Screener.Top5 {
+		if _, ok := holds[e.ETF.Code]; !ok {
+			continue
+		}
+		n := newsByCode[e.ETF.Code]
+		t := techByCode[e.ETF.Code]
+		newsBias := classifyNewsBias(n)
+		techTrend := classifyTechTrend(t)
+		gap := bestScore - e.Score
+		action, actionDesc := decideHoldAction(e, newsBias, techTrend, gap, i+1)
+		out = append(out, types.HoldReview{
+			ETFCode:    e.ETF.Code,
+			ETFName:    e.ETF.Name,
+			Sector:     e.ETF.Sector,
+			InTop:      i < 5,
+			Rank:       i + 1,
+			Score:      e.Score,
+			Action:     action,
+			ActionDesc: actionDesc,
+			NewsBias:   newsBias,
+			TechTrend:  techTrend,
+			Rationale: fmt.Sprintf(
+				"量化分%.2f（落后 best %.2f）+ 动量动作=%s + 消息面=%s + 技术趋势=%s → %s。",
+				e.Score, gap, e.ActionDesc, newsBias, techTrend, actionDesc,
+			),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// sanitizeHoldReviews 校验 LLM 返回的 HoldReviews：
+//   - 必须出自 CurrentHolds 集合；
+//   - 必须能在 Top5/豁免位中匹配到候选（否则丢弃）；
+//   - 缺字段时用规则兜底回填；
+//   - action 不在 keep/trim/rotate 中时按规则重判。
+func sanitizeHoldReviews(reviews []types.HoldReview, st *types.AgentState) []types.HoldReview {
+	if len(reviews) == 0 || st == nil || st.Screener == nil {
+		return buildHoldReviewsFallback(st)
+	}
+	holds := collectHolds(st)
+	if len(holds) == 0 {
+		return nil
+	}
+	candidateByCode := map[string]types.ScoredETF{}
+	rankByCode := map[string]int{}
+	for i, e := range st.Screener.Top5 {
+		candidateByCode[e.ETF.Code] = e
+		rankByCode[e.ETF.Code] = i + 1
+	}
+	newsByCode := map[string]types.NewsAnalysis{}
+	for _, n := range st.NewsList {
+		if n.ETFCode != "" {
+			newsByCode[n.ETFCode] = n
+		}
+	}
+	techByCode := map[string]types.TechnicalAnalysis{}
+	for _, t := range st.TechList {
+		if t.ETFCode != "" {
+			techByCode[t.ETFCode] = t
+		}
+	}
+	bestScore := 0.0
+	if len(st.Screener.Top5) > 0 {
+		bestScore = st.Screener.Top5[0].Score
+	}
+	seen := make(map[string]struct{}, len(reviews))
+	out := make([]types.HoldReview, 0, len(reviews))
+	for _, r := range reviews {
+		code := strings.TrimSpace(r.ETFCode)
+		if code == "" {
+			continue
+		}
+		if _, ok := holds[code]; !ok {
+			continue
+		}
+		e, hit := candidateByCode[code]
+		if !hit {
+			continue
+		}
+		if _, dup := seen[code]; dup {
+			continue
+		}
+		seen[code] = struct{}{}
+		if r.ETFName == "" {
+			r.ETFName = e.ETF.Name
+		}
+		if r.Sector == "" {
+			r.Sector = e.ETF.Sector
+		}
+		if r.Score == 0 {
+			r.Score = e.Score
+		}
+		if r.Rank == 0 {
+			r.Rank = rankByCode[code]
+		}
+		r.InTop = r.Rank > 0 && r.Rank <= 5
+		newsBias := classifyNewsBias(newsByCode[code])
+		techTrend := classifyTechTrend(techByCode[code])
+		if r.NewsBias == "" || !validNewsBias(r.NewsBias) {
+			r.NewsBias = newsBias
+		}
+		if r.TechTrend == "" || !validTechTrend(r.TechTrend) {
+			r.TechTrend = techTrend
+		}
+		if !validHoldAction(r.Action) {
+			r.Action, r.ActionDesc = decideHoldAction(e, newsBias, techTrend, bestScore-e.Score, r.Rank)
+		}
+		if r.ActionDesc == "" {
+			r.ActionDesc = holdActionDesc(r.Action)
+		}
+		if strings.TrimSpace(r.Rationale) == "" {
+			r.Rationale = fmt.Sprintf(
+				"量化分%.2f（落后 best %.2f）+ 动量动作=%s + 消息面=%s + 技术趋势=%s → %s。",
+				e.Score, bestScore-e.Score, e.ActionDesc, r.NewsBias, r.TechTrend, r.ActionDesc,
+			)
+		}
+		out = append(out, r)
+	}
+	// LLM 漏掉某些持仓时，用规则兜底补齐
+	if len(out) < len(holds) {
+		fallback := buildHoldReviewsFallback(st)
+		for _, r := range fallback {
+			if _, dup := seen[r.ETFCode]; dup {
+				continue
+			}
+			out = append(out, r)
+			seen[r.ETFCode] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func decideHoldAction(e types.ScoredETF, newsBias, techTrend string, gap float64, rank int) (string, string) {
+	switch {
+	case e.Action == string(ActionAvoid),
+		techTrend == "down",
+		newsBias == "negative",
+		gap >= 15 && rank > 3:
+		return "rotate", holdActionDesc("rotate")
+	case e.Action == string(ActionHoldOnly),
+		techTrend == "flat",
+		newsBias == "neutral" && gap >= 8:
+		return "trim", holdActionDesc("trim")
+	default:
+		return "keep", holdActionDesc("keep")
+	}
+}
+
+func holdActionDesc(action string) string {
+	switch action {
+	case "keep":
+		return "继续持有"
+	case "trim":
+		return "减仓观察"
+	case "rotate":
+		return "平仓切换"
+	}
+	return action
+}
+
+func validHoldAction(a string) bool {
+	return a == "keep" || a == "trim" || a == "rotate"
+}
+
+func validNewsBias(s string) bool {
+	return s == "positive" || s == "neutral" || s == "negative" || s == "unknown"
+}
+
+func validTechTrend(s string) bool {
+	return s == "up" || s == "flat" || s == "down" || s == "unknown"
+}
+
+// classifyNewsBias 把 NewsAnalysis 的 sentiment/score 折成 4 档；缺数据走 unknown。
+func classifyNewsBias(n types.NewsAnalysis) string {
+	s := strings.ToLower(strings.TrimSpace(n.Sentiment))
+	switch s {
+	case "positive", "negative", "neutral":
+		return s
+	}
+	if n.Score > 0 {
+		switch {
+		case n.Score >= 65:
+			return "positive"
+		case n.Score <= 40:
+			return "negative"
+		default:
+			return "neutral"
+		}
+	}
+	return "unknown"
+}
+
+// classifyTechTrend 把 TechnicalAnalysis.Trend 折成 up / flat / down / unknown。
+func classifyTechTrend(t types.TechnicalAnalysis) string {
+	tr := strings.ToLower(strings.TrimSpace(t.Trend))
+	switch tr {
+	case "up", "uptrend", "bull", "bullish":
+		return "up"
+	case "down", "downtrend", "bear", "bearish":
+		return "down"
+	case "flat", "sideways", "neutral", "range":
+		return "flat"
+	}
+	if tr != "" {
+		return tr
+	}
+	return "unknown"
 }
