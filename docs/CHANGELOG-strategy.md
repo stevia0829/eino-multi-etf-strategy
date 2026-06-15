@@ -595,6 +595,81 @@ go run . --mode=backtest --bt-start=2026-01-05 --bt-end=2026-06-08 --bt-variant=
 
 ---
 
+## 持仓感知 & 多持仓 HoldReviews（advice 模式专属）
+
+> 目标：解决"持仓动量还可以，但没进 Top5 → 系统没推荐 → 用户被迫卖出"的客观偏差，同时让 advice 模式支持**多 ETF 持仓**。
+>
+> **设计前提**：持仓只增加可见性，不抬分、不绕过过滤；主决策（recommendation / picks / 价格方案）保持 100% 客观，不被持仓污染。
+
+### 改动文件
+
+| 文件 | 改动 |
+|---|---|
+| `types/types.go` | 新增 `AgentState.CurrentHolds []string` / `HoldAdvices []HoldAdvice`；`ScoredETF.IsCurrentHold bool`；`FinalDecision.HoldReviews []HoldReview`；新增 `HoldReview` 类型；`PreOpenAnalysis.CurrentHolds`；旧 `CurrentHold` / `HoldAdvice` 单值字段保留为兼容快照 |
+| `agent/rotation.go` | `RotationParams.MustIncludeCodes`：TopN 截断后追加豁免位（已通过 MinScore / 过热 / Regime 等所有过滤的持仓才会被追加）；新增 `BuildHoldAdvices(holds, top5)` 多持仓对照工具 |
+| `agent/screener.go` | `ScreenerAgent.CurrentHolds`、Run 中标 `IsCurrentHold`；`dedupBySectorPreserveHolds`（同板块去重保留持仓）；`appendHoldsBeyondTop`（TopN 之外追加） |
+| `agent/final.go` | system prompt 新增 `hold_reviews` JSON schema 与 keep/trim/rotate 约束；user payload 注入 `current_holds` + `hold_candidates`（含 score / news / tech 子集）；新增 `buildHoldReviewsFallback`、`sanitizeHoldReviews`、`collectHolds(List)`、`classifyNewsBias`、`classifyTechTrend`、`decideHoldAction`；`CapByPullbackCooldownForState` 改为多持仓命中判断 |
+| `agent/preopen.go` | `applyVerdictRule` 签名 `string → map[string]struct{}`；新增 `normalizePreOpenHolds`；prompt 中 `current_hold → current_holds` |
+| `orchestrator/pipeline.go` | `Pipeline.CurrentHolds []string`，`normalizeHolds` 去重 + `firstHold` 兜底兼容旧字段 |
+| `main.go` / `cmd/preopen/main.go` | `--current-hold` 描述更新；新增 `parseCurrentHolds` 支持逗号分隔；Top5 输出加 🟦 标；HoldReviews 单独打印块 |
+| `report/writer.go` | Top5 表格给持仓行加 🟦；`writeHoldAdvice` 改为多持仓循环；新增 `writeHoldReviews` 章节（表格 + 逐只 rationale） |
+| `report/preopen_writer.go` | 集合竞价复核报告显示 `CurrentHolds` 列表 |
+| `agent/holdreview_test.go` | 新增 6 个 case：keep / rotate / 多持仓 / 池外忽略 / sanitize / `collectHoldsList` 去重 |
+| `agent/news_final_test.go` | `applyVerdictRule` 旧单 string 调用改为 `map[string]struct{}` |
+
+### 决策路径
+
+```
+CurrentHolds (CLI)
+  → Pipeline.CurrentHolds → AgentState.CurrentHolds（去重保序）
+  → ScreenerAgent.CurrentHolds
+      ├─ dedupBySectorPreserveHolds : 同板块去重时保留持仓
+      ├─ Rotation.Rank(MustIncludeCodes) : TopN 之外按客观分追加，不抬分
+      └─ 标 ScoredETF.IsCurrentHold = true
+  → AgentState.Screener.Top5（含可能的"持仓豁免位"）
+  → FinalAgent
+      ├─ payload 注入 current_holds + hold_candidates（score / news / tech）
+      ├─ LLM 输出 hold_reviews + sanitize（filter alien / 补字段 / 校验 action）
+      ├─ LLM 失败/缺字段 → buildHoldReviewsFallback（规则版客观映射）
+      └─ HoldReviews 不影响 recommendation / picks / 价格方案
+  → 报告 §九（多持仓对照）+ §十（HoldReviews 表格 + rationale）
+```
+
+### HoldReviews 三档客观规则
+
+| 触发条件 | Action | ActionDesc |
+|---|---|---|
+| Action=avoid 或 趋势=down 或 消息=negative 或 (与 best 分差 ≥15 且不在 Top3) | `rotate` | 平仓切换 |
+| Action=hold_only 或 趋势=flat 或 (消息=neutral 且 分差 ≥8) | `trim` | 减仓观察 |
+| 其他（含 strong_buy/buy + 无负向信号） | `keep` | 继续持有 |
+
+> 持仓**不在候选列表**（连 Strategy3Pool / 全部 Screener 过滤都未命中）→ 静默忽略，不出 HoldReview 条目（与用户决策"忽略，不强制评估"对齐）。
+
+### 实测验证（2026-06-11，advice 模式）
+
+```
+go run . --current-hold 513100,515220
+```
+
+- Top5 表（§七）`515220` 与 `513100` 均带 🟦；`513100` 量化分 26.78、被同板块去重保留并以"豁免位"追加到第 6；
+- §九 多持仓对照：两只都给出基于动量名次的对照建议；
+- §十 HoldReviews：`515220`(Top1, news=neutral, tech=up) → **keep**；`513100`(第6, news=negative, tech=down) → **rotate**；
+- 主决策 `recommendation=buy` / `picks` / `entry / stop / take` 仍以 Top1 客观候选 `515220` 为锚，**未因为 `513100` 是持仓而被抬上来** → 验证持仓不污染主决策。
+
+### 落地决策
+
+- ✅ **回测路径不传 `MustIncludeCodes`**：`backtest/engine.go` 仍按纯客观主流程跑，2 个月回测 +9.51% 基线未变；
+- ✅ **advice 模式默认启用**；
+- ✅ **持仓 set 全程 `map[string]struct{}` + `[]string` 双轨**，旧单值字段（`CurrentHold` / `HoldAdvice`）保留为兼容快照，sidecar / 老脚本不破。
+
+### 待办
+
+- [ ] 长样本（≥1 年含一次 bear）回测：advice 路径**虚拟开关**注入 `MustIncludeCodes` 模拟长期持仓行为，看 HoldReviews 的 rotate / keep 建议在历史上是否能跑赢"无脑跟 Top1"（量化版"换手懒惰"vs"客观换仓"对照）。
+- [ ] PreOpen Agent 在 LLM 路径中也消费 `hold_candidates` 维度（当前 PreOpen 只用 holds set 做 isHolding 判断）。
+- [ ] 报告 §十增加"换仓建议明细"：当 HoldReview.Action=rotate 时，自动建议"切换到 Best/Pick #2"，并比较两者的 score / sector / news / tech 差距。
+
+---
+
 ## 推荐执行顺序速查（P0~P5）
 
 > 这是按"投入产出比"排序的演进路线表，与上面 P1/P2/P3 章节内容呼应；后续每完成一项，把"状态"列从 ⏳ 改为 ✅，并在对应的 P 章节追加实测数据。
