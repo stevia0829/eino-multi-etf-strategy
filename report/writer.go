@@ -270,24 +270,29 @@ func writeFinal(b *strings.Builder, f *types.FinalDecision) {
 	}
 	b.WriteString("## 八、加权综合评分与交易决策 (FinalAgent)\n\n")
 	b.WriteString("**多 Agent 加权打分**\n\n")
-	b.WriteString("| 维度 | 子分数 | 权重 | 贡献分 |\n|---|---|---|---|\n")
+	b.WriteString("| 维度 | 子分数 | 权重 | 跨标调整 | 贡献分 |\n|---|---|---|---|---|\n")
 	if f.ScoreBreakdown != nil {
-		row := func(label, sk, wk, pk string) {
-			b.WriteString(fmt.Sprintf("| %s | %.2f | %.0f%% | %.2f |\n",
-				label, f.ScoreBreakdown[sk], f.ScoreBreakdown[wk]*100, f.ScoreBreakdown[pk]))
+		row := func(label, sk, wk, skAdj, pk string) {
+			adj := f.ScoreBreakdown[skAdj]
+			adjStr := ""
+			if adj > 0 && (adj < 0.995 || adj > 1.005) {
+				adjStr = fmt.Sprintf("%+.1f%%", (adj-1)*100)
+			}
+			b.WriteString(fmt.Sprintf("| %s | %.2f | %.0f%% | %s | %.2f |\n",
+				label, f.ScoreBreakdown[sk], f.ScoreBreakdown[wk]*100, adjStr, f.ScoreBreakdown[pk]))
 		}
-		row("量化动量", "quant", "quant_weight", "quant_part")
-		row("消息面", "news", "news_weight", "news_part")
-		row("跨境联动", "global", "global_weight", "global_part")
-		row("技术面", "tech", "tech_weight", "tech_part")
+		row("量化动量", "quant", "quant_weight", "quant", "quant_part")
+		row("消息面", "news", "news_weight", "news_adj", "news_part")
+		row("跨境联动", "global", "global_weight", "global", "global_part")
+		row("技术面", "tech", "tech_weight", "tech_adj", "tech_part")
 		if _, ok := f.ScoreBreakdown["regime"]; ok {
-			row("宏观环境", "regime", "regime_weight", "regime_part")
+			row("宏观环境", "regime", "regime_weight", "regime", "regime_part")
 		}
 		if _, ok := f.ScoreBreakdown["flow"]; ok {
-			row("资金面", "flow", "flow_weight", "flow_part")
+			row("资金面", "flow", "flow_weight", "flow", "flow_part")
 		}
 	}
-	b.WriteString(fmt.Sprintf("| **综合** |  |  | **%.2f** |\n\n", f.OverallScore))
+	b.WriteString(fmt.Sprintf("| **综合** |  |  |  | **%.2f** |\n\n", f.OverallScore))
 
 	b.WriteString("**操作建议**\n\n")
 	b.WriteString("| 项目 | 数值 |\n|---|---|\n")

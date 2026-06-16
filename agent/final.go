@@ -84,6 +84,12 @@ const finalSystemPrompt = `你是一名拥有 20 年实战经验的"首席投资
 
 【综合评分 → recommendation】
 - overall_score = Σ weight_i × factor_score_i
+- 消息面 / 技术面的 factor_score 必须做**跨标校准**：
+  先看 news_list / tech_list 中其他候选的 Score 均值，再决定 target 的两因子贡献：
+  · target 的 news/tech score 显著高于 peers（高出 15%+）→ 该因子贡献 +5%~+10%
+  · target 显著低于 peers（低出 15%+）→ 该因子贡献 -5%~-10%
+  · 无显著差异（±15% 以内）→ 不做调整
+  这是 Simons 派的"因子相对强度"逻辑：孤立看 70 分没有意义，关键看同类是 50 还是 75。
 - 映射： >=80 strong_buy / >=65 buy / >=50 hold / 否则 avoid
 - 当 regime.trend == "risk_off" 时强制 avoid（达利欧派一票否决）；
   regime.trend == "bear" 时降一档（strong_buy/buy → hold）
@@ -353,37 +359,108 @@ func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 
 func weightedScore(st *types.AgentState) float64 {
 	w := WeightsForSector(st.Screener.Best.ETF.Sector)
+	bestCode := st.Screener.Best.ETF.Code
 	q := st.Screener.Best.Score
 	n := scoreOr(st.News, 50)
 	g := scoreOrG(st.Global, 50)
 	t := scoreOrT(st.Tech, 50)
 	r := scoreOrR(st.Regime, 50)
 	m := scoreOrM(st.MoneyFlow, 50)
-	return w.Quant*q + w.Tech*t + w.News*n + w.Global*g + w.Regime*r + w.Flow*m
+
+	// 跨标的相对比较：best 的消息面/技术面 vs 同类均值的偏离 → ±10% 因子调权
+	nAdj, tAdj := 1.0, 1.0
+	if peerNewsAvg, ok := peerAvgNews(st.NewsList, bestCode); ok {
+		nAdj = relativeAdjust(n, peerNewsAvg)
+	}
+	if peerTechAvg, ok := peerAvgTech(st.TechList, bestCode); ok {
+		tAdj = relativeAdjust(t, peerTechAvg)
+	}
+
+	return w.Quant*q + w.Tech*t*tAdj + w.News*n*nAdj + w.Global*g + w.Regime*r + w.Flow*m
+}
+
+// peerAvgNews 计算 NewsList 中除 bestCode 外所有 ETF 的 Score 均值。
+func peerAvgNews(list []types.NewsAnalysis, bestCode string) (float64, bool) {
+	sum, cnt := 0.0, 0
+	for _, n := range list {
+		if n.ETFCode == bestCode || n.ETFCode == "" || n.Sentiment == "" {
+			continue
+		}
+		if n.Score > 0 {
+			sum += n.Score
+			cnt++
+		}
+	}
+	if cnt == 0 {
+		return 0, false
+	}
+	return sum / float64(cnt), true
+}
+
+// peerAvgTech 计算 TechList 中除 bestCode 外所有 ETF 的 Score 均值。
+func peerAvgTech(list []types.TechnicalAnalysis, bestCode string) (float64, bool) {
+	sum, cnt := 0.0, 0
+	for _, t := range list {
+		if t.ETFCode == bestCode || t.ETFCode == "" || t.Trend == "" {
+			continue
+		}
+		if t.Score > 0 {
+			sum += t.Score
+			cnt++
+		}
+	}
+	if cnt == 0 {
+		return 0, false
+	}
+	return sum / float64(cnt), true
+}
+
+// relativeAdjust 计算 best 相对 peerAvg 的偏离，返回 [0.90, 1.10] 的因子调权系数。
+// 逻辑：同板块新闻/技术面互为参照，best 与 peers 无显著差异时不调权（1.0）；
+// best 显著优于 peers → 加大消息面/技术面因子贡献；best 显著弱于 peers → 减小贡献。
+func relativeAdjust(bestScore, peerAvg float64) float64 {
+	if peerAvg <= 0 {
+		return 1.0
+	}
+	diff := (bestScore - peerAvg) / peerAvg // 相对偏离
+	factor := 1.0 + clamp(diff*0.5, -0.10, 0.10)
+	return factor
 }
 
 // scoreBreakdown 把加权分数拆开返回，便于在报告中展示。
 func scoreBreakdown(st *types.AgentState) map[string]float64 {
 	w := WeightsForSector(st.Screener.Best.ETF.Sector)
+	bestCode := st.Screener.Best.ETF.Code
 	q := st.Screener.Best.Score
 	n := scoreOr(st.News, 50)
 	g := scoreOrG(st.Global, 50)
 	t := scoreOrT(st.Tech, 50)
 	r := scoreOrR(st.Regime, 50)
 	m := scoreOrM(st.MoneyFlow, 50)
+
+	nAdj, tAdj := 1.0, 1.0
+	if peerAvg, ok := peerAvgNews(st.NewsList, bestCode); ok {
+		nAdj = relativeAdjust(n, peerAvg)
+	}
+	if peerAvg, ok := peerAvgTech(st.TechList, bestCode); ok {
+		tAdj = relativeAdjust(t, peerAvg)
+	}
+
 	return map[string]float64{
 		"quant":         q,
 		"quant_weight":  w.Quant,
 		"quant_part":    w.Quant * q,
 		"news":          n,
 		"news_weight":   w.News,
-		"news_part":     w.News * n,
+		"news_adj":      nAdj,
+		"news_part":     w.News * n * nAdj,
 		"global":        g,
 		"global_weight": w.Global,
 		"global_part":   w.Global * g,
 		"tech":          t,
 		"tech_weight":   w.Tech,
-		"tech_part":     w.Tech * t,
+		"tech_adj":      tAdj,
+		"tech_part":     w.Tech * t * tAdj,
 		"regime":        r,
 		"regime_weight": w.Regime,
 		"regime_part":   w.Regime * r,
