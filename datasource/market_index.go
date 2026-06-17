@@ -1,9 +1,11 @@
 package datasource
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -93,6 +95,10 @@ func (f *IndexFetcher) FetchIndex(symbols []string) map[string]IndexQuote {
 			continue
 		}
 		if q := f.fetchFromStooq(key); q.Last > 0 {
+			out[key] = q
+			continue
+		}
+		if q := f.fetchFromYahoo(key); q.Last > 0 {
 			out[key] = q
 			continue
 		}
@@ -230,4 +236,108 @@ func (f *IndexFetcher) fetchFromStooq(symbol string) IndexQuote {
 // 即使中文乱码也不影响数字解析）。
 func decodeGBK(b []byte) string {
 	return string(b)
+}
+
+// ── Yahoo Finance v8 API（2026-06 Stooq 加 JS 验证后新增）─────────────────
+
+var yahooSymbolMap = map[string]string{
+	"SPX":   "^GSPC",
+	"NDX":   "^IXIC",
+	"DJI":   "^DJI",
+	"N225":  "^N225",
+	"KOSPI": "KS11",
+}
+
+// fetchFromYahoo 通过 Yahoo Finance v8 chart API 获取指数最新报价。
+// URL: https://query1.finance.yahoo.com/v8/finance/chart/{code}?range=3d&interval=1d
+func (f *IndexFetcher) fetchFromYahoo(symbol string) IndexQuote {
+	code, ok := yahooSymbolMap[symbol]
+	if !ok {
+		return IndexQuote{Symbol: symbol}
+	}
+	urlStr := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?range=3d&interval=1d", url.PathEscape(code))
+	req, _ := http.NewRequest("GET", urlStr, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	resp, err := f.HTTP.Do(req)
+	if err != nil {
+		return IndexQuote{Symbol: symbol}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var raw struct {
+		Chart struct {
+			Error  interface{} `json:"error"`
+			Result []struct {
+				Meta struct {
+					RegularMarketPrice float64 `json:"regularMarketPrice"`
+					RegularMarketTime  int64   `json:"regularMarketTime"`
+					PreviousClose      float64 `json:"previousClose"`
+					ChartPreviousClose float64 `json:"chartPreviousClose"`
+				} `json:"meta"`
+				Timestamp  []int64 `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open  []float64 `json:"open"`
+						Close []float64 `json:"close"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+		} `json:"chart"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return IndexQuote{Symbol: symbol}
+	}
+	if len(raw.Chart.Result) == 0 {
+		return IndexQuote{Symbol: symbol}
+	}
+	meta := raw.Chart.Result[0].Meta
+	if meta.RegularMarketPrice <= 0 {
+		return IndexQuote{Symbol: symbol}
+	}
+
+	// prev close：Yahoo v8 对指数类 symbol 常常不返回 previousClose/chartPreviousClose，
+	// 优先用 meta 字段，不可用时从 indicators 倒数第二根 bar 的 close 推。
+	prevClose := meta.PreviousClose
+	if prevClose <= 0 {
+		prevClose = meta.ChartPreviousClose
+	}
+	if prevClose <= 0 {
+		if len(raw.Chart.Result[0].Indicators.Quote) > 0 {
+			closes := raw.Chart.Result[0].Indicators.Quote[0].Close
+			if len(closes) >= 2 {
+				prevClose = closes[len(closes)-2]
+			}
+		}
+	}
+
+	change := meta.RegularMarketPrice - prevClose
+	chgPct := 0.0
+	if prevClose > 0 {
+		chgPct = change / prevClose
+	}
+
+	tm := time.Now()
+	if meta.RegularMarketTime > 0 {
+		tm = time.Unix(meta.RegularMarketTime, 0)
+	}
+
+	q := IndexQuote{
+		Symbol: symbol, Name: symbol,
+		Last: meta.RegularMarketPrice, PrevClose: prevClose,
+		Change: change, ChangePct: chgPct,
+		Time: tm, Source: "yahoo",
+	}
+	// 美股指数：严格 tick 维度校验；亚太指数：仅日期维度校验
+	isAsia := symbol == "N225" || symbol == "KOSPI" || symbol == "HSI"
+	if isAsia {
+		if f.isFutureDay(q.Time) {
+			return IndexQuote{Symbol: symbol}
+		}
+	} else {
+		if f.isFutureTick(q.Time) {
+			return IndexQuote{Symbol: symbol}
+		}
+	}
+	return q
 }
