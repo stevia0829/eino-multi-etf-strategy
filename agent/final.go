@@ -251,7 +251,7 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 		dec.OverallScore = weightedScore(st)
 	}
 	if dec.Recommendation == "" {
-		dec.Recommendation = ruleRecommend(dec.OverallScore)
+		dec.Recommendation = RuleRecommend(dec.OverallScore)
 	}
 	dec.Recommendation = CapRecommendation(dec.Recommendation, st.Regime)
 	if capped, note := CapByPremium(dec.Recommendation, target.ETF.PremiumPct); note != "" {
@@ -265,10 +265,10 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 		dec.EntryPrice = target.ETF.Price
 	}
 	if dec.StopLoss == 0 {
-		dec.StopLoss = defaultStopLoss(target)
+		dec.StopLoss = DefaultStopLoss(target)
 	}
 	if dec.TakeProfit == 0 {
-		dec.TakeProfit = defaultTakeProfit(target)
+		dec.TakeProfit = DefaultTakeProfit(target)
 	}
 	if capped, note := CapByPullbackCooldownForState(dec.Recommendation, target, st); note != "" {
 		dec.Recommendation = capped
@@ -312,7 +312,7 @@ func ruleBasedFinal(dec *types.FinalDecision, st *types.AgentState) {
 func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 	target := st.Screener.Best
 	dec.OverallScore = weightedScore(st)
-	dec.Recommendation = ruleRecommend(dec.OverallScore)
+	dec.Recommendation = RuleRecommend(dec.OverallScore)
 	dec.Recommendation = CapRecommendation(dec.Recommendation, st.Regime)
 	premiumNote := ""
 	if capped, note := CapByPremium(dec.Recommendation, target.ETF.PremiumPct); note != "" {
@@ -325,8 +325,8 @@ func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 		cooldownNote = note
 	}
 	dec.EntryPrice = target.ETF.Price
-	dec.StopLoss = defaultStopLoss(target)
-	dec.TakeProfit = defaultTakeProfit(target)
+	dec.StopLoss = DefaultStopLoss(target)
+	dec.TakeProfit = DefaultTakeProfit(target)
 	rrNote := ""
 	if _, note := CapByRiskReward(dec.Recommendation, dec.EntryPrice, dec.StopLoss, dec.TakeProfit); note != "" {
 		rrNote = note
@@ -367,7 +367,9 @@ func RuleBasedDecision(dec *types.FinalDecision, st *types.AgentState) {
 func weightedScore(st *types.AgentState) float64 {
 	w := WeightsForSector(st.Screener.Best.ETF.Sector)
 	bestCode := st.Screener.Best.ETF.Code
-	q := st.Screener.Best.Score
+	// 用量化裸分（Strategy3Score 线性映射到 0~100），而非 sigmoid+R² 归一化分，
+	// 保证 ranking 和聚宽裸动量一致。sigmoid 归一化仅在报告展示用。
+	q := rawQuantScore(st.Screener.Best)
 	n := scoreOr(st.News, 50)
 	g := scoreOrG(st.Global, 50)
 	t := scoreOrT(st.Tech, 50)
@@ -384,6 +386,25 @@ func weightedScore(st *types.AgentState) float64 {
 	}
 
 	return w.Quant*q + w.Tech*t*tAdj + w.News*n*nAdj + w.Global*g + w.Regime*r + w.Flow*m
+}
+
+// rawQuantScore 从 ScoredETF 取出策略 3 裸分（Strategy3Score），
+// 线性映射到 0~100，与聚宽裸动量排序一致。
+// 裸分 0 → 50，裸分 0.5 → 75，裸分 1.0 → 100，裸分 <0 → clamp 到 0~50。
+func rawQuantScore(e types.ScoredETF) float64 {
+	raw := e.Indicators["Strategy3Score"]
+	if raw == 0 {
+		// 退化：没有 Strategy3Score 时用归一化分反推
+		return e.Score
+	}
+	mapped := 50 + raw*50
+	if mapped < 0 {
+		mapped = 0
+	}
+	if mapped > 100 {
+		mapped = 100
+	}
+	return mapped
 }
 
 // peerAvgNews 计算 NewsList 中除 bestCode 外所有 ETF 的 Score 均值。
@@ -438,7 +459,7 @@ func relativeAdjust(bestScore, peerAvg float64) float64 {
 func scoreBreakdown(st *types.AgentState) map[string]float64 {
 	w := WeightsForSector(st.Screener.Best.ETF.Sector)
 	bestCode := st.Screener.Best.ETF.Code
-	q := st.Screener.Best.Score
+	q := rawQuantScore(st.Screener.Best)
 	n := scoreOr(st.News, 50)
 	g := scoreOrG(st.Global, 50)
 	t := scoreOrT(st.Tech, 50)
@@ -477,7 +498,8 @@ func scoreBreakdown(st *types.AgentState) map[string]float64 {
 	}
 }
 
-func defaultStopLoss(target types.ScoredETF) float64 {
+// DefaultStopLoss 返回基于 MA20 的默认止损价。
+func DefaultStopLoss(target types.ScoredETF) float64 {
 	ma20 := target.Indicators["MA20"]
 	if ma20 > 0 && ma20 < target.ETF.Price {
 		return ma20 * 0.99
@@ -485,7 +507,7 @@ func defaultStopLoss(target types.ScoredETF) float64 {
 	return target.ETF.Price * 0.97
 }
 
-func defaultTakeProfit(target types.ScoredETF) float64 {
+func DefaultTakeProfit(target types.ScoredETF) float64 {
 	vol := target.Indicators["Volatility"]
 	if vol > 0 {
 		return target.ETF.Price * (1 + clamp(vol*5, 0.04, 0.10))
@@ -523,7 +545,7 @@ func clamp(v, lo, hi float64) float64 {
 	return v
 }
 
-// ruleRecommend 把综合分映射成 recommendation。
+// RuleRecommend 把综合分映射成 recommendation。
 //
 // 阈值口径（已对齐聚宽：动量分一旦 >0 就建议持有 rank[0]）：
 //   - 综合分 ≥ 70 → strong_buy（动量加速，可加仓）
@@ -534,7 +556,7 @@ func clamp(v, lo, hi float64) float64 {
 // 设计依据：底层 normalizeStrategy3Score 把 score=0 映射到 50，score=0.3 → ~63。
 // 旧阈值 65/50 会把"动量弱正向 + 多因子中性"的标的（综合分 50~65）映射成 hold，
 // 在每日状态机里等同于平仓 → 频繁空仓 / 错过持续上涨。新阈值让动量正向标的稳定进 buy。
-func ruleRecommend(s float64) string {
+func RuleRecommend(s float64) string {
 	switch {
 	case s >= 70:
 		return "strong_buy"
@@ -823,35 +845,35 @@ func summarizeTop5(top []types.ScoredETF) []map[string]interface{} {
 	for i, e := range top {
 		ind := e.Indicators
 		entry := map[string]interface{}{
-			"rank":                i + 1,
-			"code":                e.ETF.Code,
-			"name":                e.ETF.Name,
-			"sector":              e.ETF.Sector,
-			"price":               e.ETF.Price,
-			"premium_pct":         e.ETF.PremiumPct,
-			"premium_risk":        PremiumRiskLabel(e.ETF.PremiumPct),
-			"score":               e.Score,
-			"action":              e.Action,
-			"action_desc":         e.ActionDesc,
-			"reason":              e.Reason,
-			"is_current_hold":     e.IsCurrentHold,
-			"indicators":          ind,
+			"rank":            i + 1,
+			"code":            e.ETF.Code,
+			"name":            e.ETF.Name,
+			"sector":          e.ETF.Sector,
+			"price":           e.ETF.Price,
+			"premium_pct":     e.ETF.PremiumPct,
+			"premium_risk":    PremiumRiskLabel(e.ETF.PremiumPct),
+			"score":           e.Score,
+			"action":          e.Action,
+			"action_desc":     e.ActionDesc,
+			"reason":          e.Reason,
+			"is_current_hold": e.IsCurrentHold,
+			"indicators":      ind,
 			// 以下为 LLM 易读的扁平化关键指标（同时保留完整 indicators map）
-			"ma5":                 ind["MA5"],
-			"ma20":                ind["MA20"],
-			"ma60":                ind["MA60"],
-			"rsi":                 ind["RSI"],
-			"macd_dif":            ind["DIF"],
-			"macd_dea":            ind["DEA"],
-			"macd_hist":           ind["HIST"],
-			"momentum_20":         ind["Momentum20"],
-			"vol_ratio":           ind["VolRatio"],
-			"volatility":          ind["Volatility"],
-			"strategy3_score":     ind["Strategy3Score"],
-			"annualized_return":   ind["AnnualizedReturn"],
-			"weighted_r2":         ind["WeightedR2"],
+			"ma5":                  ind["MA5"],
+			"ma20":                 ind["MA20"],
+			"ma60":                 ind["MA60"],
+			"rsi":                  ind["RSI"],
+			"macd_dif":             ind["DIF"],
+			"macd_dea":             ind["DEA"],
+			"macd_hist":            ind["HIST"],
+			"momentum_20":          ind["Momentum20"],
+			"vol_ratio":            ind["VolRatio"],
+			"volatility":           ind["Volatility"],
+			"strategy3_score":      ind["Strategy3Score"],
+			"annualized_return":    ind["AnnualizedReturn"],
+			"weighted_r2":          ind["WeightedR2"],
 			"prev_strategy3_score": ind["PrevStrategy3Score"],
-			"iopv":                ind["IOPV"],
+			"iopv":                 ind["IOPV"],
 			"premium_penalty_mult": ind["PremiumPenaltyMult"],
 		}
 		out = append(out, entry)
@@ -961,8 +983,8 @@ func buildAltPick(e types.ScoredETF, n types.NewsAnalysis, t types.TechnicalAnal
 	if n.Sentiment != "" {
 		rationale += fmt.Sprintf("消息面 %s。", n.Sentiment)
 	}
-	stop := defaultStopLoss(e)
-	take := defaultTakeProfit(e)
+	stop := DefaultStopLoss(e)
+	take := DefaultTakeProfit(e)
 	if _, note := CapByRiskReward(rec, e.ETF.Price, stop, take); note != "" {
 		riskNotes = append(riskNotes, "盈亏比提示："+note)
 	}
@@ -1010,10 +1032,10 @@ func sanitizePicks(picks []types.FinalPick, st *types.AgentState, dec *types.Fin
 			p.EntryPrice = e.ETF.Price
 		}
 		if p.StopLoss == 0 {
-			p.StopLoss = defaultStopLoss(e)
+			p.StopLoss = DefaultStopLoss(e)
 		}
 		if p.TakeProfit == 0 {
-			p.TakeProfit = defaultTakeProfit(e)
+			p.TakeProfit = DefaultTakeProfit(e)
 		}
 		if e.ETF.Code == dec.TargetETF.ETF.Code {
 			if p.Recommendation != dec.Recommendation {

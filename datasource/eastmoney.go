@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eino-multi-etf-strategy/types"
@@ -47,11 +48,22 @@ type RealtimeQuoter interface {
 
 type EastMoneyDataSource struct {
 	HTTPClient *http.Client
+
+	mu      sync.RWMutex
+	klCache map[string]klCacheEntry
 }
+
+type klCacheEntry struct {
+	klines []types.KLine
+	at     time.Time
+}
+
+var klCacheTTL = 5 * time.Minute
 
 func NewEastMoneyDataSource() *EastMoneyDataSource {
 	return &EastMoneyDataSource{
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		klCache:    make(map[string]klCacheEntry),
 	}
 }
 
@@ -109,15 +121,32 @@ func (e *EastMoneyDataSource) GetKLine(code string, days int) ([]types.KLine, er
 
 // GetKLineAsOf 严格只走真实数据源：腾讯前复权 → EastMoney 历史 K 线。
 // 全部失败时直接返回 ErrNoRealData，绝不再返回伪造（mock）K 线。
+// 内置进程级缓存：同 code+asOf 在 TTL 内直接命中，大幅降低回测 API 调用量。
 func (e *EastMoneyDataSource) GetKLineAsOf(code string, days int, asOf time.Time) ([]types.KLine, error) {
-	if klines := e.fetchTencentKLine(code, days, asOf); len(klines) > 0 {
-		return klines, nil
+	cacheKey := fmt.Sprintf("kl:%s:%s:%d", code, asOf.Format("2006-01-02"), days)
+
+	// 读缓存
+	e.mu.RLock()
+	if entry, ok := e.klCache[cacheKey]; ok && time.Since(entry.at) < klCacheTTL {
+		e.mu.RUnlock()
+		return entry.klines, nil
 	}
-	if klines := e.fetchEastMoneyKLine(code, days, asOf); len(klines) > 0 {
-		return klines, nil
+	e.mu.RUnlock()
+
+	var klines []types.KLine
+	if klines = e.fetchTencentKLine(code, days, asOf); len(klines) == 0 {
+		if klines = e.fetchEastMoneyKLine(code, days, asOf); len(klines) == 0 {
+			return nil, fmt.Errorf("getKLineAsOf %s days=%d asOf=%s: %w",
+				code, days, asOf.Format("2006-01-02"), ErrNoRealData)
+		}
 	}
-	return nil, fmt.Errorf("getKLineAsOf %s days=%d asOf=%s: %w",
-		code, days, asOf.Format("2006-01-02"), ErrNoRealData)
+
+	// 写缓存
+	e.mu.Lock()
+	e.klCache[cacheKey] = klCacheEntry{klines: klines, at: time.Now()}
+	e.mu.Unlock()
+
+	return klines, nil
 }
 
 // FetchRealtimeQuote 拉取腾讯实时报价（qt.gtimg.cn），用于补全 IOPV / 溢价率。

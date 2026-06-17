@@ -171,8 +171,16 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 		e.Screener.Rotation.Params = p
 	}
 
-	// 用基准 ETF（510300）的历史 K 线来确定有效交易日序列
-	baseKlines, err := e.DS.GetKLineAsOf("510300", 1500, end)
+	// 用基准 ETF（510300）的历史 K 线来确定有效交易日序列。
+	// 按区间日数 × 1.5 推算所需 days（日历→交易日冗余充足，不再固定 1500 被打爆）。
+	needDays := int(end.Sub(start).Hours()/24)*3/2 + 200
+	if needDays < 200 {
+		needDays = 200
+	}
+	if needDays > 1500 {
+		needDays = 1500
+	}
+	baseKlines, err := e.DS.GetKLineAsOf("510300", needDays, end)
 	if err != nil || len(baseKlines) == 0 {
 		return nil, fmt.Errorf("load benchmark klines: %v", err)
 	}
@@ -427,46 +435,64 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 			target = newTarget
 		}
 
-		st := &types.AgentState{Screener: scr, Regime: regime}
-		if hold != nil {
-			st.CurrentHold = hold.code
+		// ── 对齐聚宽：用 RotationAgent 裸分（Strategy3Score），跳过 sigmoid+R² 归一化 ──
+		// Sigmoid 归一化 + R² 置信度乘子会改变排名，导致与聚宽裸分不一致。
+		// 权重融合（weightedScore）在实盘 advice 模式才生效，回测只靠裸动量。
+		rawScore := target.Indicators["Strategy3Score"]
+		if rawScore == 0 {
+			rawScore = target.Score / 100 * 6 // 退化：从归一化分反推
 		}
 		dec := &types.FinalDecision{TargetETF: target}
-		agent.RuleBasedDecision(dec, st)
-
-		posCap := 0.5
-		regimeTrend := "neutral"
-		if regime != nil {
-			posCap = regime.PositionCap
-			regimeTrend = regime.Trend
+		dec.OverallScore = target.Score // 报告展示用归一化分
+		// 裸分 > 0 即买入（对齐聚宽 MinScore=0 语义）
+		if rawScore > 0 {
+			dec.Recommendation = "buy"
+			if rawScore >= 1.0 {
+				dec.Recommendation = "strong_buy"
+			}
+		} else {
+			dec.Recommendation = "hold"
+		}
+		// regime 仅在 risk_off 时强制清仓，其余满仓（对齐聚宽不降仓）
+		dec.Recommendation = agent.CapRecommendation(dec.Recommendation, regime)
+		if dec.EntryPrice == 0 {
+			dec.EntryPrice = target.ETF.Price
+		}
+		if dec.StopLoss == 0 {
+			dec.StopLoss = agent.DefaultStopLoss(target)
+		}
+		if dec.TakeProfit == 0 {
+			dec.TakeProfit = agent.DefaultTakeProfit(target)
 		}
 
-		// 决策映射：是否应该持有 best
-		shouldHold := dec.Recommendation == "buy" || dec.Recommendation == "strong_buy"
-
-		// ── 持仓状态机 ─────────────────────────────────────────────
-		if hold != nil {
-			// 当前已有持仓
-			if shouldHold && target.ETF.Code == hold.code {
-				// 信号一致 → 继续持有
-				continue
+		// 仓位：risk_off → 0，其余满仓 100%（对齐聚宽）
+		posCap := 1.0
+		regimeTrend := "neutral"
+		if regime != nil {
+			regimeTrend = regime.Trend
+			if regime.Trend == "risk_off" {
+				posCap = 0
 			}
-			// 信号反转或换标的 → 当日收盘平仓
+		}
+
+		// 决策映射：裸分 > 0 即可入场；持仓时只看 rank[0] 是否换标（对齐聚宽）
+		shouldEnter := rawScore > 0
+		if hold != nil {
+			// 已持仓：只有 rank[0] 换标才平仓（对齐聚宽）
+			if target.ETF.Code == hold.code {
+				continue // 同一标的，无论分数涨跌都不动
+			}
+			// 换标了 → 平旧仓
 			px := priceOnDate(hold.klineCache, d)
 			if px > 0 {
-				reason := "signal_change"
-				if !shouldHold {
-					reason = "no_buy_signal"
-				}
-				exit(d, px, reason)
+				exit(d, px, "rotation")
 			} else {
-				// 拿不到当日价（停牌等），强行用入场价平 0 收益
 				exit(d, hold.entryPrice, "no_price")
 			}
 		}
 
-		// 平仓后（hold == nil），若新信号是 buy/strong_buy → 当日收盘入场
-		if shouldHold {
+		// 空仓 → 裸分 > 0 时建仓
+		if shouldEnter {
 			// 拉入场后到区间末的 K 线
 			tailEnd := dates[len(dates)-1].AddDate(0, 0, 5)
 			span := int(tailEnd.Sub(d).Hours()/24) + 30
