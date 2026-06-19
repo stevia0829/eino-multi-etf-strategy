@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 func makeStateWithHolds(holds []string, top5 []types.ScoredETF, news []types.NewsAnalysis, tech []types.TechnicalAnalysis) *types.AgentState {

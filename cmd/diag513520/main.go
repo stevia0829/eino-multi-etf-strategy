@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
 )
 
 func main() {

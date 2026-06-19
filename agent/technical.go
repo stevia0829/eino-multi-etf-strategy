@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/eino-multi-etf-strategy/indicator"
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/indicator"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 type TechnicalAgent struct {

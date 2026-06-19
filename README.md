@@ -19,7 +19,7 @@ LLM 统一使用 **DeepSeek (deepseek-chat)**，通过 OpenAI 兼容协议调用
   - **截图识别 Skill**：Vision LLM 解析持仓截图 → `{code, name, qty, cost, mkt_value}` → 校验 / 纠错 → 写入 `current_holds.json`（增量覆盖），全程不要求用户手动录入；
   - **Cron 调度器**：T 日 `08:30 → advice`、`09:22 → preopen` 复核两条定时任务，自动把 `current_holds.json` 注入为 `--current-hold a,b,c` 参数；
   - **历史报告 Web 站**：Nginx + 静态页 + 简易 Flask 列表与全文检索，承载 `report/etf-report-*.md` 与 `*.json` sidecar。
-- **C · eino Multi-Agent ETF Strategy（本仓库）**：ScreenerAgent（21 日加权动量 + R² + Regime 闸门 + 持仓豁免位）→ News / Global / Tech / Regime / MoneyFlow / Memory 6 路 fan-out → FinalAgent 投委会 5 视角融合（板块自适应权重 + Recommendation 阈值 + 回撤冷却闸门 + 盈亏比闸门 + HoldReviews 持仓评审）→ Report Writer 落地 Markdown + JSON sidecar；09:20 由 PreOpenAgent 用 `gap_pct / premium` 校准 `chase / on_target / wait_pullback`。
+- **C · Multi Agents ETF Trade Strategy（本仓库）**：ScreenerAgent（21 日加权动量 + R² + Regime 闸门 + 持仓豁免位）→ News / Global / Tech / Regime / MoneyFlow / Memory 6 路 fan-out → FinalAgent 投委会 5 视角融合（板块自适应权重 + Recommendation 阈值 + 回撤冷却闸门 + 盈亏比闸门 + HoldReviews 持仓评审）→ Report Writer 落地 Markdown + JSON sidecar；09:20 由 PreOpenAgent 用 `gap_pct / premium` 校准 `chase / on_target / wait_pullback`。
 - **C-mem · 三层记忆管理**：
   - 短期 = `types.AgentState`（fan-out 上下文）
   - 中期 = `current_holds.json`（OpenClaw 写、advice / preopen 读）

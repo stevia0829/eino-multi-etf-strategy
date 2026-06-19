@@ -6,8 +6,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // MoneyFlowAgent 资金流向 Agent。

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/agent"
-	"github.com/eino-multi-etf-strategy/backtest"
-	"github.com/eino-multi-etf-strategy/config"
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/orchestrator"
-	"github.com/eino-multi-etf-strategy/report"
+	"github.com/multi-agents-etf-trade-strategy/agent"
+	"github.com/multi-agents-etf-trade-strategy/backtest"
+	"github.com/multi-agents-etf-trade-strategy/config"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/orchestrator"
+	"github.com/multi-agents-etf-trade-strategy/report"
 )
 
 func main() {

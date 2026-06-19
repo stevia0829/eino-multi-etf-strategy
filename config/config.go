@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/llm"
 )
 
 type Config struct {

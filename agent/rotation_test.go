@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // mockDS 简单的测试数据源：根据 (code, asOf, days) 构造确定性 K 线。

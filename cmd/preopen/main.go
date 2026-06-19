@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/agent"
-	"github.com/eino-multi-etf-strategy/config"
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/report"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/agent"
+	"github.com/multi-agents-etf-trade-strategy/config"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/report"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // cmd/preopen 9:24 集合竞价复核独立二进制。

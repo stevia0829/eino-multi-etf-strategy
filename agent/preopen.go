@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // PreOpenAgent 9:24 集合竞价复核 Agent。

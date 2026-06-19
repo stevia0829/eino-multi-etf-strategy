@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 func TestBuildNewsKeywords_CoalUsesPreciseKeywords(t *testing.T) {

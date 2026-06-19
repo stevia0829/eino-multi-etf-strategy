@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/indicator"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/indicator"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // ScreenerAgent 现在以策略 3（ETF 轮动）作为底层评分器：

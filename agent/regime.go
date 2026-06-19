@@ -6,9 +6,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/indicator"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/indicator"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // RegimeAgent 宏观环境过滤：基于沪深300ETF（510300）的中长期趋势 + 回撤，
