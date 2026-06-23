@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // CachedDataSource 包装任意 ETFDataSource，对所有 GetKLineAsOf 调用做内存缓存。

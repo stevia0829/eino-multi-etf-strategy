@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 func mkKlines(closes []float64) []types.KLine {

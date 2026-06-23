@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/indicator"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/indicator"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // Strategy3Pool 来源于 strategy.py 中 g.etf_pool_3，覆盖

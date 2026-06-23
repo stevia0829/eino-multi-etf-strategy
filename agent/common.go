@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/eino-multi-etf-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/llm"
 )
 
 // extractJSON 从 LLM 输出中提取 JSON 字符串：去掉 markdown code fence、抓取首尾大括号。

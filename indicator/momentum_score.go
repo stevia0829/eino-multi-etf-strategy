@@ -3,7 +3,7 @@ package indicator
 import (
 	"math"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // MomentumScore 实现策略 3（ETF 轮动）的核心打分算法。

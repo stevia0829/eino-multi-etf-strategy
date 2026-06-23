@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/indicator"
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/indicator"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // FinalAgent 投委会主席。其"长期记忆"由独立的 MemoryAgent 在 pipeline

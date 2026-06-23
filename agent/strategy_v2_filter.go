@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // Strategy V2 过滤器：来自 stratagyV2.py 的 4 道胜率闸门。

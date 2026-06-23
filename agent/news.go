@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // NewsAgent 板块消息面研判 Agent。

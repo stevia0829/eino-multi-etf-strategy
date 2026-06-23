@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/agent"
-	"github.com/eino-multi-etf-strategy/datasource"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/agent"
+	"github.com/multi-agents-etf-trade-strategy/datasource"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // Trade 单次回测交易记录（状态化每日回测：一笔从 EntryDate 入场到 ExitDate 平仓的完整交易）。

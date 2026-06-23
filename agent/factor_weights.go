@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // FactorWeights 描述六个因子在最终评分中的权重轮廓。

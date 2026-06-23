@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/eino-multi-etf-strategy/llm"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/llm"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 // MemoryAgent 长期记忆 Agent。

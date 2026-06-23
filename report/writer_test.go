@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 func mkState() *types.AgentState {

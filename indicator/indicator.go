@@ -3,7 +3,7 @@ package indicator
 import (
 	"math"
 
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 func MA(klines []types.KLine, n int) float64 {

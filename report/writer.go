@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-multi-etf-strategy/agent"
-	"github.com/eino-multi-etf-strategy/types"
+	"github.com/multi-agents-etf-trade-strategy/agent"
+	"github.com/multi-agents-etf-trade-strategy/types"
 )
 
 type Writer struct {
