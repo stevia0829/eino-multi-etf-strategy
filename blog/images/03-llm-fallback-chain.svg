@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 580">
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+  <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/></marker>
+  <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#059669"/></marker>
+  <filter id="shadow" x="-3%" y="-3%" width="110%" height="110%"><feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.08"/></filter>
+</defs>
+<rect width="960" height="580" fill="#f8fafc"/>
+<text x="480" y="35" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#1e293b">LLM 模型降级链：Resilient Client 三级容灾</text>
+<rect x="460-120" y="80" width="240" height="28" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="460" y="99" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1e40af"><tspan font-weight="bold">应用层</tspan>  advice模式 · FinalAgent · NewsAgent · GlobalAgent · TechAgent</text>
+<line x1="460" y1="108" x2="460" y2="118" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="460-90" y="122" width="180" height="28" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="460" y="141" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1e40af"><tspan font-weight="bold">统一入口</tspan>  callLLMJSON(ctx, system, user) → Temperature=0.2</text>
+<line x1="460" y1="150" x2="460" y2="160" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="460-100" y="164" width="200" height="28" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="460" y="183" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1e40af"><tspan font-weight="bold">重试层</tspan>  maxRetries=2 · baseDelay=500ms · 指数退避</text>
+<line x1="460" y1="192" x2="460" y2="202" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="460" y="196" width="300" height="28" rx="8" fill="#1e293b" opacity="0.9"/>
+<text x="610.0" y="215" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#ffffff">Provider层</text>
+<rect x="70" y="234" width="160" height="70" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="150" y="252" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#2563eb">Primary</text>
+<text x="150" y="270" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#2563eb">DeepSeek</text>
+<text x="150" y="288" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#2563eb">(deepseek-chat)</text>
+<rect x="260" y="234" width="160" height="70" rx="8" fill="#dcfce7" stroke="#059669" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="340" y="252" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#059669">Fallback[0]</text>
+<text x="340" y="270" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#059669">MoonShot</text>
+<text x="340" y="288" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#059669">(moonshot-v1-8k)</text>
+<rect x="450" y="234" width="160" height="70" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="530" y="252" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#d97706">Fallback[1]</text>
+<text x="530" y="270" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#d97706">Doubao</text>
+<text x="530" y="288" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#d97706">(doubao-pro-32k)</text>
+<rect x="640" y="234" width="160" height="70" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="720" y="252" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#db2777">Fallback[2]</text>
+<text x="720" y="270" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#db2777">Qwen</text>
+<text x="720" y="288" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#db2777">(qwen-plus)</text>
+<rect x="820" y="234" width="160" height="70" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="900" y="252" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#64748b">Static</text>
+<text x="900" y="270" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#64748b">Fallback</text>
+<text x="900" y="288" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#64748b">(rule-based)</text>
+<line x1="230" y1="269" x2="260" y2="269" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+<text x="245" y="262" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#dc2626">✗ fail</text>
+<line x1="420" y1="269" x2="450" y2="269" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+<text x="435" y="262" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#dc2626">✗ fail</text>
+<line x1="610" y1="269" x2="640" y2="269" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+<text x="625" y="262" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#dc2626">✗ fail</text>
+<line x1="800" y1="269" x2="820" y2="269" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+<rect x="40" y="415" width="880" height="120" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="438" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">LLM 完全不可用时：确定性规则兜底</text>
+<rect x="60" y="450" width="195" height="75" rx="6" fill="#dbeafe" stroke="#cbd5e1" stroke-width="1"/>
+<text x="157" y="468" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">GlobalAgent</text>
+<text x="157" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">ruleBasedGlobalFromQuotes()</text>
+<text x="157" y="500" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">SPX/NDX涨跌幅均值→sentiment</text>
+<rect x="270" y="450" width="195" height="75" rx="6" fill="#dcfce7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="367" y="468" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">FinalAgent</text>
+<text x="367" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">RuleBasedDecision()</text>
+<text x="367" y="500" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">加权公式直出·跳过LLM合成</text>
+<rect x="480" y="450" width="195" height="75" rx="6" fill="#fef3c7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="577" y="468" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">TechnicalAgent</text>
+<text x="577" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">无LLM纯指标</text>
+<text x="577" y="500" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">MA/RSI/MACD·规则分类</text>
+<rect x="690" y="450" width="195" height="75" rx="6" fill="#fce7f3" stroke="#cbd5e1" stroke-width="1"/>
+<text x="787" y="468" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">NewsAgent</text>
+<text x="787" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">关键词匹配兜底</text>
+<text x="787" y="500" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">ETFNewsKeywords映射表</text>
+<text x="480" y="565" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#94a3b8">llm/resilient.go · llm/factory.go · agent/common.go</text>
+</svg>

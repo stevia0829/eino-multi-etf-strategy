@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 680">
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+  </marker>
+  <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+  </marker>
+  <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#ea580c"/>
+  </marker>
+  <filter id="shadow" x="-5%" y="-5%" width="120%" height="120%">
+    <feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.1"/>
+  </filter>
+  <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#3b82f6"/>
+    <stop offset="100%" stop-color="#1d4ed8"/>
+  </linearGradient>
+  <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#059669"/>
+    <stop offset="100%" stop-color="#047857"/>
+  </linearGradient>
+</defs>
+<rect width="960" height="680" fill="#f8fafc"/>
+<text x="480" y="38" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="#1e293b">ETF 轮动策略：加权对数回归动量打分流水线</text>
+<rect x="40" y="65" width="880" height="90" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="88" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">数据层：多源 K 线</text>
+<rect x="80" y="100" width="210" height="42" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+<text x="185" y="115" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">腾讯财经</text>
+<text x="185" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">web.ifzq.gtimg.cn</text>
+<text x="185" y="139" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">(前复权 qfq)</text>
+<rect x="310" y="100" width="210" height="42" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+<text x="415" y="115" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">东方财富</text>
+<text x="415" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">push2his.eastmoney.com</text>
+<text x="415" y="139" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">(前复权 fqt=1)</text>
+<rect x="540" y="100" width="210" height="42" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+<text x="645" y="115" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">进程级缓存</text>
+<text x="645" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">klCache</text>
+<text x="645" y="139" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">(TTL 5min)</text>
+<rect x="740" y="100" width="210" height="42" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+<text x="845" y="115" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">72只ETF × 1500日</text>
+<text x="845" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">日K线序列</text>
+<line x1="480" y1="155" x2="480" y2="185" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="40" y="190" width="880" height="130" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="213" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">核心算法：MomentumScore (indicator/momentum_score.go)</text>
+<rect x="80" y="225" width="185" height="80" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="172" y="243" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e40af">① y=log(Close)</text>
+<text x="172" y="261" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">对最近21日</text>
+<text x="172" y="274" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">收盘取自然对数</text>
+<rect x="280" y="225" width="185" height="80" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="372" y="243" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e40af">② 加权回归</text>
+<text x="372" y="261" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">w=linspace(1,2,21)</text>
+<text x="372" y="274" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">slope=WLS(x,y,w)</text>
+<rect x="480" y="225" width="185" height="80" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="572" y="243" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e40af">③ 年化+R²</text>
+<text x="572" y="261" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">annual=exp(slope×250)-1</text>
+<text x="572" y="274" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">R²=1-SSE/SST (未加权均值)</text>
+<rect x="680" y="225" width="185" height="80" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="772" y="243" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e40af">④ score</text>
+<text x="772" y="261" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">score=annual×R²</text>
+<text x="772" y="274" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">不clamp[0,1]</text>
+<text x="772" y="287" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">负R²压低震荡标的</text>
+<line x1="265" y1="265" x2="280" y2="265" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="465" y1="265" x2="480" y2="265" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="665" y1="265" x2="680" y2="265" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="480" y1="320" x2="480" y2="355" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="40" y="360" width="880" height="120" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="383" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">后处理：归一化 + 排名</text>
+<rect x="80" y="395" width="260" height="70" rx="6" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+<text x="210" y="413" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#166534">sigmoid 归一化 (展示用)</text>
+<text x="210" y="428" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">100/(1+e^{-2.5×score}) × (0.5+0.5R²)</text>
+<text x="210" y="443" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">→ [0,100] 平滑分值</text>
+<rect x="400" y="395" width="260" height="70" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+<text x="530" y="413" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e40af">rawQuantScore 线性映射 (回测用)</text>
+<text x="530" y="428" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">50 + raw × 50</text>
+<text x="530" y="443" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">→ 与聚宽裸分排序一致</text>
+<rect x="720" y="395" width="170" height="70" rx="6" fill="#fefce8" stroke="#fde047" stroke-width="1"/>
+<text x="805" y="413" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#854d0e">排名过滤</text>
+<text x="805" y="428" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">MinScore=0</text>
+<text x="805" y="443" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#475569">过热门槛 ×1.1</text>
+<line x1="340" y1="430" x2="395" y2="430" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<line x1="660" y1="430" x2="715" y2="430" stroke="#ea580c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+<line x1="480" y1="480" x2="480" y2="515" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="40" y="520" width="880" height="110" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="543" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">输出：多Agent 融合 &amp; 回测验证</text>
+<rect x="80" y="555" width="185" height="60" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1"/>
+<text x="172" y="571" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">ScreenerAgent</text>
+<text x="172" y="585" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">Top5 候选 + Action</text>
+<rect x="280" y="555" width="185" height="60" rx="6" fill="#f0fdf4" stroke="#059669" stroke-width="1"/>
+<text x="372" y="571" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">FinalAgent</text>
+<text x="372" y="585" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">加权综合评分</text>
+<text x="372" y="599" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">5人投委会合成</text>
+<rect x="480" y="555" width="185" height="60" rx="6" fill="#fefce8" stroke="#d97706" stroke-width="1"/>
+<text x="572" y="571" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">回测引擎</text>
+<text x="572" y="585" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">joinquant对齐</text>
+<text x="572" y="599" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">状态化每日回测</text>
+<rect x="680" y="555" width="185" height="60" rx="6" fill="#fdf2f8" stroke="#db2777" stroke-width="1"/>
+<text x="772" y="571" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">Markdown报告</text>
+<text x="772" y="585" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">入场/止损/止盈</text>
+<text x="772" y="599" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#1e293b">多维度风险指标</text>
+<text x="480" y="650" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">验证：2026-04~06 joinquant+20.30% | Sharpe 3.01 | 与聚宽策略同口径</text>
+</svg>

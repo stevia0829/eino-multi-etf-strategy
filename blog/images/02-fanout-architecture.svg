@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720">
+<defs>
+  <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+  <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#059669"/></marker>
+  <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#ea580c"/></marker>
+  <filter id="shadow" x="-3%" y="-3%" width="110%" height="110%"><feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.08"/></filter>
+</defs>
+<rect width="1000" height="720" fill="#f8fafc"/>
+<text x="500" y="38" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="#1e293b">Fan-out &amp; Synthesize 多Agent架构</text>
+<rect x="350" y="65" width="300" height="50" rx="10" fill="url(#f44336)" filter="url(#shadow)"/>
+<rect x="350" y="65" width="300" height="50" rx="10" fill="#1e293b" opacity="0.9"/>
+<text x="500" y="85" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">ScreenerAgent · 量化筛选</text>
+<text x="500" y="102" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#cbd5e1">Strategy3Pool → MomentumScore → Top5 候选</text>
+<line x1="500" y1="115" x2="500" y2="155" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+<rect x="60" y="165" width="165" height="120" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+<rect x="60" y="165" width="165" height="30" rx="8" fill="#dbeafe"/>
+<rect x="60" y="180" width="165" height="15" fill="#dbeafe"/>
+<text x="142" y="185" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#2563eb">NewsAgent</text>
+<text x="142" y="213" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">消息面分析</text>
+<text x="142" y="233" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">财经新闻 · 产业政策</text>
+<text x="142" y="247" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">关键词匹配 · 情感极性</text>
+<rect x="240" y="165" width="165" height="120" rx="8" fill="#ffffff" stroke="#059669" stroke-width="1.5" filter="url(#shadow)"/>
+<rect x="240" y="165" width="165" height="30" rx="8" fill="#dcfce7"/>
+<rect x="240" y="180" width="165" height="15" fill="#dcfce7"/>
+<text x="322" y="185" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#059669">GlobalMarketAgent</text>
+<text x="322" y="213" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">跨境联动</text>
+<text x="322" y="233" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">SPX/NDX/DJI实时</text>
+<text x="322" y="247" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">日经/KOSPI/恒生</text>
+<rect x="420" y="165" width="165" height="120" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5" filter="url(#shadow)"/>
+<rect x="420" y="165" width="165" height="30" rx="8" fill="#fef3c7"/>
+<rect x="420" y="180" width="165" height="15" fill="#fef3c7"/>
+<text x="502" y="185" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#d97706">TechnicalAgent</text>
+<text x="502" y="213" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">技术面分析</text>
+<text x="502" y="233" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">MA排列 · MACD</text>
+<text x="502" y="247" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">RSI · 量比 · 布林带</text>
+<rect x="600" y="165" width="165" height="120" rx="8" fill="#ffffff" stroke="#db2777" stroke-width="1.5" filter="url(#shadow)"/>
+<rect x="600" y="165" width="165" height="30" rx="8" fill="#fce7f3"/>
+<rect x="600" y="180" width="165" height="15" fill="#fce7f3"/>
+<text x="682" y="185" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#db2777">RegimeAgent</text>
+<text x="682" y="213" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">宏观环境</text>
+<text x="682" y="233" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">沪深300趋势</text>
+<text x="682" y="247" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">多头排列 · 回撤 · 仓位</text>
+<rect x="780" y="165" width="165" height="120" rx="8" fill="#ffffff" stroke="#4f46e5" stroke-width="1.5" filter="url(#shadow)"/>
+<rect x="780" y="165" width="165" height="30" rx="8" fill="#e0e7ff"/>
+<rect x="780" y="180" width="165" height="15" fill="#e0e7ff"/>
+<text x="862" y="185" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#4f46e5">MoneyFlowAgent</text>
+<text x="862" y="213" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">资金面分析</text>
+<text x="862" y="233" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">北向资金 · ETF申赎</text>
+<text x="862" y="247" text-anchor="middle" font-family="Arial,sans-serif" font-size="9.5" fill="#64748b">主力 · 超大单净流入</text>
+<line x1="500" y1="155" x2="142" y2="163" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+<line x1="500" y1="155" x2="322" y2="163" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+<line x1="500" y1="155" x2="502" y2="163" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+<line x1="500" y1="155" x2="682" y2="163" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+<line x1="500" y1="155" x2="862" y2="163" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+<rect x="250" y="325" width="500" height="55" rx="10" fill="#1e293b" opacity="0.9" filter="url(#shadow)"/>
+<text x="500" y="347" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">FinalAgent · 投委会合成</text>
+<text x="500" y="367" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#cbd5e1">5位委员加权表决 + 板块自适应权重 + 6道反身性风控</text>
+<line x1="142" y1="286" x2="500" y2="323" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<line x1="322" y1="286" x2="500" y2="323" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<line x1="502" y1="286" x2="500" y2="323" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<line x1="682" y1="286" x2="500" y2="323" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<line x1="862" y1="286" x2="500" y2="323" stroke="#059669" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+<rect x="40" y="420" width="920" height="115" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="443" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">5人投委会 · 权重分配 (板块自适应)</text>
+<rect x="60" y="455" width="165" height="70" rx="6" fill="#dbeafe" stroke="#cbd5e1" stroke-width="1"/>
+<text x="142" y="471" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">西蒙斯Simons</text>
+<text x="142" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">量化派·因子相关性</text>
+<text x="142" y="499" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">Quant 20-30% | 严格按板块自适应权重加权</text>
+<rect x="240" y="455" width="165" height="70" rx="6" fill="#dcfce7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="322" y="471" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">达利欧Dalio</text>
+<text x="322" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">全天候·宏观风控</text>
+<text x="322" y="499" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">Regime 一票否决 | risk_off→强制avoid</text>
+<rect x="420" y="455" width="165" height="70" rx="6" fill="#fef3c7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="502" y="471" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">利弗莫尔Livermore</text>
+<text x="502" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">趋势派·突破信号</text>
+<text x="502" y="499" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">Tech 20-30% | MA排列/MACD/量比</text>
+<rect x="600" y="455" width="165" height="70" rx="6" fill="#fce7f3" stroke="#cbd5e1" stroke-width="1"/>
+<text x="682" y="471" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">索罗斯Soros</text>
+<text x="682" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">反身性·跨境资金</text>
+<text x="682" y="499" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">Global+Flow 30-40% | 海外联动+北向资金</text>
+<rect x="780" y="455" width="165" height="70" rx="6" fill="#e0e7ff" stroke="#cbd5e1" stroke-width="1"/>
+<text x="862" y="471" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">巴菲特Buffett</text>
+<text x="862" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">价值派·安全边际</text>
+<text x="862" y="499" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">Premium 否决 | 溢价≥3%→强制hold</text>
+<line x1="500" y1="380" x2="500" y2="545" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<rect x="250" y="555" width="500" height="70" rx="10" fill="#f0fdf4" stroke="#059669" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="500" y="578" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#166534">输出：综合评分 + 建议 + 入场/止损/止盈 + 投委会纪要</text>
+<text x="500" y="598" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">LLM不可用时全部走规则兜底 RuleBasedDecision → 系统零宕机</text>
+<text x="500" y="700" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#94a3b8">orchestrator/pipeline.go | agent/final.go | agent/factor_weights.go</text>
+</svg>

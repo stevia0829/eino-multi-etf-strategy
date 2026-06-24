@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500">
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+  <filter id="shadow" x="-3%" y="-3%" width="110%" height="110%"><feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.08"/></filter>
+</defs>
+<rect width="960" height="500" fill="#f8fafc"/>
+<text x="480" y="35" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#1e293b">AI Native 开发之旅：从聚宽脚本到自动化交易系统</text>
+<line x1="60" y1="110" x2="900" y2="110" stroke="#cbd5e1" stroke-width="3"/>
+<circle cx="100" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="100" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">聚宽原型</text>
+<rect x="60" y="130" width="140" height="90" rx="8" fill="#fef3c7" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="130" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">ETF轮动策略</text>
+<text x="130" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">Python脚本</text>
+<text x="130" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">在聚宽社区发现</text>
+<text x="130" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">get_etf_rank公式</text>
+<circle cx="240" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="240" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">Sprint 0</text>
+<rect x="200" y="130" width="140" height="90" rx="8" fill="#fee2e2" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="270" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">Go重写核心</text>
+<text x="270" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">MomentumScore()</text>
+<text x="270" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">原始版本</text>
+<text x="270" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">累计收益 -15.34%</text>
+<circle cx="380" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="380" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">Sprint 1</text>
+<rect x="340" y="130" width="140" height="90" rx="8" fill="#dbeafe" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="410" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">数据保真</text>
+<text x="410" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">回测基线</text>
+<text x="410" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">真实K线/资金流</text>
+<text x="410" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">累计收益 -14.74%</text>
+<circle cx="520" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="520" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">动量修复</text>
+<rect x="480" y="130" width="140" height="90" rx="8" fill="#dcfce7" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="550" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">R²公式对齐</text>
+<text x="550" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">聚宽对照模式</text>
+<text x="550" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">joinquant +20.89%</text>
+<text x="550" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">P0主流程 +19.87%</text>
+<circle cx="660" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="660" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">Multi-Agent</text>
+<rect x="620" y="130" width="140" height="90" rx="8" fill="#e0e7ff" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="690" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">Fan-out 6路Agent</text>
+<text x="690" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">投委会合成</text>
+<text x="690" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">News/Global/Tech</text>
+<text x="690" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">Regime/MoneyFlow</text>
+<circle cx="800" cy="110" r="8" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<text x="800" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="#1e293b">生产闭环</text>
+<rect x="760" y="130" width="140" height="90" rx="8" fill="#f3e8ff" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+<text x="830" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">Cron + 微信推送</text>
+<text x="830" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#475569">OpenClaw → SOLO</text>
+<text x="830" y="190" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">每日自动信号</text>
+<text x="830" y="204" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#64748b">三层记忆管理</text>
+<rect x="40" y="260" width="880" height="105" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="283" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#64748b">工具链演进</text>
+<rect x="60" y="298" width="200" height="55" rx="6" fill="#fef3c7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="160" y="314" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">Claw 🌐</text>
+<text x="160" y="332" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">微信截图→持仓识别
+Vision LLM图片解析</text>
+<text x="160" y="346" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#94a3b8">数据采集层</text>
+<rect x="280" y="298" width="200" height="55" rx="6" fill="#dbeafe" stroke="#cbd5e1" stroke-width="1"/>
+<text x="380" y="314" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">Cron ⏰</text>
+<text x="380" y="332" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">每日定时调度
+advice + preopen + backtest</text>
+<text x="380" y="346" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#94a3b8">工作流层</text>
+<rect x="500" y="298" width="200" height="55" rx="6" fill="#dcfce7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="600" y="314" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">SOLO 🤖</text>
+<text x="600" y="332" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">全流程AI辅助开发
+代码/CR/回测/文档/重构</text>
+<text x="600" y="346" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#94a3b8">开发层</text>
+<rect x="720" y="298" width="200" height="55" rx="6" fill="#fce7f3" stroke="#cbd5e1" stroke-width="1"/>
+<text x="820" y="314" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="bold" fill="#1e293b">3层记忆</text>
+<text x="820" y="332" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#475569">短期·中期·长期
+AgentState/JSON/MD</text>
+<text x="820" y="346" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" fill="#94a3b8">知识层</text>
+<rect x="40" y="395" width="880" height="75" rx="8" fill="#1e293b" opacity="0.9"/>
+<text x="480" y="420" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#fbbf24">核心数据：从 -15.34% 到 +20.30%  ·  胜率从 31.82% 到 61.54%  ·  Sharpe 从负到 3.01</text>
+<text x="480" y="445" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#cbd5e1">试错成本从 2 个月降到了 2 天——不是因为 AI 替我做了决策，而是因为 AI 让每次测试的成本趋近于零。</text>
+</svg>
