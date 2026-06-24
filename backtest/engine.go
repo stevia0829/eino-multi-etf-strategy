@@ -670,6 +670,7 @@ func summarize(r *Result, costPerSide float64) {
 	netDates := make([]time.Time, 0, len(r.Trades)) // 与 netRets 对齐的入场日
 	sumWin, sumLoss := 0.0, 0.0
 	winCount, lossCount := 0, 0
+	sumHoldDays := 0 // 实际持仓天数累计（用于推导年化频率）
 	r.Total = len(r.Trades)
 	for _, t := range r.Trades {
 		if t.Recommendation == "hold" || t.Recommendation == "avoid" {
@@ -677,6 +678,9 @@ func summarize(r *Result, costPerSide float64) {
 			continue
 		}
 		executed++
+		if t.HoldDays > 0 {
+			sumHoldDays += t.HoldDays
+		}
 		if t.Win {
 			r.Wins++
 		} else {
@@ -713,10 +717,17 @@ func summarize(r *Result, costPerSide float64) {
 			sumSq += (x - r.AvgReturn) * (x - r.AvgReturn)
 		}
 		r.StdReturn = math.Sqrt(sumSq / float64(executed))
-		if r.StdReturn > 0 {
-			// 简易 Sharpe：年化收益 / 年化波动（假设每次持有 5 日，一年约 50 个非重叠样本）
-			r.Sharpe = (r.AvgReturn * 50) / (r.StdReturn * math.Sqrt(50))
+		// 年化频率 = 252 交易日 / 实际平均持仓天数（信号驱动，非固定 5 日）
+		avgHold := 5.0
+		if executed > 0 && sumHoldDays > 0 {
+			avgHold = float64(sumHoldDays) / float64(executed)
 		}
+		annualFreq := 252.0 / avgHold
+		if r.StdReturn > 0 {
+			// 简易 Sharpe：年化收益 / 年化波动
+			r.Sharpe = (r.AvgReturn * annualFreq) / (r.StdReturn * math.Sqrt(annualFreq))
+		}
+		r.HoldDays = int(avgHold) // 记录实际平均持仓天数
 
 		// ── 权益曲线（连续复利，初始 1.0）+ MDD ──────────────────────
 		equity := 1.0
@@ -776,7 +787,7 @@ func summarize(r *Result, costPerSide float64) {
 		if downCount > 0 {
 			downStd := math.Sqrt(downSumSq / float64(downCount))
 			if downStd > 0 {
-				r.Sortino = (netAvg * 50) / (downStd * math.Sqrt(50))
+				r.Sortino = (netAvg * annualFreq) / (downStd * math.Sqrt(annualFreq))
 			}
 		}
 
