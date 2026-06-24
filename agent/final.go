@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multi-agents-etf-trade-strategy/indicator"
 	"github.com/multi-agents-etf-trade-strategy/llm"
 	"github.com/multi-agents-etf-trade-strategy/types"
 )
@@ -571,8 +572,30 @@ func RuleRecommend(s float64) string {
 
 const (
 	pullbackCooldownLookback = 5
-	pullbackCooldownTrigger  = 0.05 // 固定阈值：近 5 日高点回撤 ≥ 5%
+	pullbackCooldownDefault  = 0.05 // 固定 fallback 阈值（ATR 不可用时使用）
 )
+
+// pullbackCooldownTrigger 计算 ATR 自适应的回撤冷却触发阈值。
+// 基于 2 × ATR14 / price，clamp 到 [3%, 10%]：
+//   - 高波动品种（贵金属、海外）：ATR 大 → 阈值放宽（如 8%），避免频繁误触发冷却
+//   - 低波动品种（债券、宽基）：ATR 小 → 阈值收窄（如 3%），更敏感地捕捉异常回撤
+//   - ATR 不可用时退化到固定 5%
+func pullbackCooldownTrigger(klines []types.KLine, price float64) float64 {
+	trigger := pullbackCooldownDefault
+	if len(klines) >= 15 && price > 0 {
+		atr := indicator.ATR(klines, 14)
+		if atr > 0 {
+			trigger = 2 * atr / price
+			if trigger < 0.03 {
+				trigger = 0.03
+			}
+			if trigger > 0.10 {
+				trigger = 0.10
+			}
+		}
+	}
+	return trigger
+}
 
 // CapByPullbackCooldown 在强动量标的短线急跌且尚未修复时，把新开仓建议降为 hold。
 // 规则：
@@ -661,7 +684,8 @@ func PullbackCooldownNote(target types.ScoredETF) string {
 		return ""
 	}
 	pullback := (high - price) / high
-	if pullback < pullbackCooldownTrigger {
+	trigger := pullbackCooldownTrigger(klines, price)
+	if pullback < trigger {
 		return ""
 	}
 
@@ -674,8 +698,8 @@ func PullbackCooldownNote(target types.ScoredETF) string {
 	if reclaimedMA5 || reclaimedPrevHalf {
 		return ""
 	}
-	return fmt.Sprintf("近%d日高点回撤 %.2f%%（阈值 %.0f%%），且未收复 MA5 / 最近阴线半分位",
-		pullbackCooldownLookback, pullback*100, pullbackCooldownTrigger*100)
+	return fmt.Sprintf("近%d日高点回撤 %.2f%%（ATR 自适应阈值 %.1f%%），且未收复 MA5 / 最近阴线半分位",
+		pullbackCooldownLookback, pullback*100, trigger*100)
 }
 
 func avgClose(klines []types.KLine, n int) float64 {

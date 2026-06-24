@@ -133,6 +133,12 @@ type RotationParams struct {
 	// 空字符串视为"未知"，按"启用 P1"保守处理（避免漏过崩盘期）。
 	RegimeTrend string
 
+	// MultiWindowWindows 多窗口动量融合的窗口列表；非空时启用多窗口融合替代单一 MDays。
+	// 推荐值: []int{10, 21, 40}。留空表示使用传统单一 MDays 窗口。
+	// 多窗口融合按各自 R² 加权：高 R²（强线性趋势）的窗口获得更大权重，
+	// 低 R²（震荡）的窗口被降权或排除，从而在不同行情节奏下都能命中有效信号。
+	MultiWindowWindows []int
+
 	// MustIncludeCodes 强制保留进结果列表的 ETF 代码（典型用法：当前持仓）。
 	// 它不会改变评分逻辑、不会插队、不会让标的"绕过"MinScore / 过热过滤，
 	// 仅在 TopN 截断时给这些标的一个豁免位：若分数本就在 TopN 内则不影响，
@@ -366,6 +372,16 @@ func (a *RotationAgent) Rank(ctx context.Context) ([]RotationCandidate, error) {
 	if useConvexity && p.ConvexityLookback+2 > need {
 		need = p.ConvexityLookback + 2
 	}
+	// 多窗口融合：数据需求取 max(windows)+1
+	minWindow := p.MDays
+	for _, w := range p.MultiWindowWindows {
+		if w+1 > need {
+			need = w + 1
+		}
+		if w > minWindow {
+			minWindow = w
+		}
+	}
 
 	for _, e := range Strategy3Pool {
 		select {
@@ -374,18 +390,27 @@ func (a *RotationAgent) Rank(ctx context.Context) ([]RotationCandidate, error) {
 		default:
 		}
 		klines, err := a.DS.GetKLineAsOf(e.Code, need, a.AsOf)
-		if err != nil || len(klines) < p.MDays {
+		if err != nil || len(klines) < minWindow {
 			continue
 		}
 
-		// T 日 score
-		score, ann, r2 := indicator.MomentumScore(klines, p.MDays)
+		// T 日 score = 用最后 mDays 根 K 线（或多窗口融合）
+		var score, ann, r2 float64
+		if len(p.MultiWindowWindows) > 0 {
+			score, ann, r2 = indicator.MultiWindowMomentumScore(klines, p.MultiWindowWindows)
+		} else {
+			score, ann, r2 = indicator.MomentumScore(klines, p.MDays)
+		}
 
 		// T-1 日 score = 去掉最后一根
 		var prev float64
 		hasPrev := false
-		if len(klines) > p.MDays {
-			prev, _, _ = indicator.MomentumScore(klines[:len(klines)-1], p.MDays)
+		if len(klines) > minWindow {
+			if len(p.MultiWindowWindows) > 0 {
+				prev, _, _ = indicator.MultiWindowMomentumScore(klines[:len(klines)-1], p.MultiWindowWindows)
+			} else {
+				prev, _, _ = indicator.MomentumScore(klines[:len(klines)-1], p.MDays)
+			}
 			hasPrev = true
 		}
 

@@ -31,7 +31,7 @@ func main() {
 		btStep      = flag.Int("bt-step", 5, "backtest 采样间隔（交易日，状态化模式下忽略）")
 		btHold      = flag.Int("bt-hold", 5, "backtest 持有期（已废弃，实际由信号驱动持仓）")
 		btMax       = flag.Int("bt-max", 60, "backtest 最大样本数")
-		btVariant   = flag.String("bt-variant", "both", "回测变体：v3 / v3v2 / v3p1 / both / both_p1 / joinquant")
+		btVariant   = flag.String("bt-variant", "both", "回测变体：v3 / v3v2 / v3p1 / v3opt / both / both_p1 / both_opt / joinquant")
 	)
 	flag.Parse()
 
@@ -246,11 +246,11 @@ func runBacktest(startStr, endStr, dateStr string, step, hold, maxSamples int, v
 
 	ds := datasource.ETFDataSource(datasource.NewEastMoneyDataSource())
 
-	// 对比模式 (both/both_p1) 下，两个变体必须跑在完全相同的数据基线上。
+	// 对比模式 (both/both_p1/both_opt) 下，两个变体必须跑在完全相同的数据基线上。
 	// 用 CachedDataSource 包装底层源：第一个变体拉数据并缓存，第二个变体直接复用。
-	// 单变体模式 (v3/v3v2/v3p1/joinquant) 不包装（无对比需求）。
+	// 单变体模式 (v3/v3v2/v3p1/v3opt/joinquant) 不包装（无对比需求）。
 	var sharedDS *datasource.CachedDataSource
-	if variant == "both" || variant == "both_p1" {
+	if variant == "both" || variant == "both_p1" || variant == "both_opt" {
 		sharedDS = datasource.NewCachedDataSource(ds)
 		ds = sharedDS
 	}
@@ -280,7 +280,7 @@ func runBacktest(startStr, endStr, dateStr string, step, hold, maxSamples int, v
 	}
 
 	switch variant {
-	case "v3", "v3v2", "joinquant", "v3p1":
+	case "v3", "v3v2", "joinquant", "v3p1", "v3opt":
 		res := runOne(variant)
 		filename := fmt.Sprintf("backtest-%s-%s.md", variant, time.Now().Format("20060102-150405"))
 		path := filepath.Join(reportDir, filename)
@@ -314,8 +314,21 @@ func runBacktest(startStr, endStr, dateStr string, step, hold, maxSamples int, v
 		}
 		abs, _ := filepath.Abs(path)
 		fmt.Println("📄 P0 vs P1 对比回测报告已生成:", abs)
+	case "both_opt":
+		// v3opt 先跑（需要 41 根 K 线），缓存后 v3（22 根）直接从缓存截取，保证基线一致
+		resV3Opt := runOne("v3opt")
+		resV3 := runOne("v3")
+		filename := fmt.Sprintf("backtest-compare-opt-%s.md", time.Now().Format("20060102-150405"))
+		path := filepath.Join(reportDir, filename)
+		md := backtest.BuildOptCompareMarkdown(resV3, resV3Opt)
+		if err := os.WriteFile(path, []byte(md), 0o644); err != nil {
+			fmt.Println("write opt compare report error:", err)
+			return
+		}
+		abs, _ := filepath.Abs(path)
+		fmt.Println("📄 v3 vs v3opt（P0+P1 优化）对比回测报告已生成:", abs)
 	default:
-		fmt.Printf("invalid --bt-variant: %s (expect v3/v3v2/v3p1/both/both_p1/joinquant)\n", variant)
+		fmt.Printf("invalid --bt-variant: %s (expect v3/v3v2/v3p1/v3opt/both/both_p1/both_opt/joinquant)\n", variant)
 		os.Exit(2)
 	}
 	_ = agent.NewScreenerAgent

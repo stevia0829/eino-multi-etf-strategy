@@ -97,6 +97,93 @@ func MomentumScore(klines []types.KLine, mDays int) (score, annualized, r2 float
 	return score, annualized, r2
 }
 
+// MultiWindowMomentumScore 多窗口动量融合：同时计算多个回归窗口的动量分，
+// 按各自 R² 加权融合。比单一窗口更鲁棒——短窗口捕获快速趋势，
+// 长窗口过滤噪音，融合后在不同行情节奏下都能命中。
+//
+// 融合公式（只用 R² > 0 的窗口参与）：
+//
+//	fused_score = Σ max(R²_m, 0) × score_m / Σ max(R²_m, 0)
+//	fused_ann   = Σ max(R²_m, 0) × annualized_m / Σ max(R²_m, 0)
+//	fused_r2    = Σ max(R²_m, 0) × R²_m / Σ max(R²_m, 0)
+//
+// 若所有窗口 R² ≤ 0（全部无效拟合），退化返回最大窗口的结果。
+// windows 留空时退化到单一 MDays=21 的 MomentumScore。
+func MultiWindowMomentumScore(klines []types.KLine, windows []int) (score, annualized, r2 float64) {
+	if len(windows) == 0 {
+		return MomentumScore(klines, 21)
+	}
+
+	var sumW, sumWScore, sumWAnn, sumWR2 float64
+	var fallbackScore, fallbackAnn, fallbackR2 float64
+	hasFallback := false
+
+	for _, w := range windows {
+		if w <= 1 || len(klines) < w {
+			continue
+		}
+		s, a, r := MomentumScore(klines, w)
+
+		// 记录最大窗口的结果作为 fallback
+		if !hasFallback || w >= windows[len(windows)-1] {
+			fallbackScore, fallbackAnn, fallbackR2 = s, a, r
+			hasFallback = true
+		}
+
+		weight := r
+		if weight < 0 {
+			weight = 0 // R² ≤ 0 的窗口视为"无效拟合"，不参与融合
+		}
+		sumW += weight
+		sumWScore += weight * s
+		sumWAnn += weight * a
+		sumWR2 += weight * r
+	}
+
+	if sumW > 1e-12 {
+		score = sumWScore / sumW
+		annualized = sumWAnn / sumW
+		r2 = sumWR2 / sumW
+	} else if hasFallback {
+		// 所有窗口 R² ≤ 0：退化返回最大窗口结果
+		score, annualized, r2 = fallbackScore, fallbackAnn, fallbackR2
+	}
+	return score, annualized, r2
+}
+
+// ATR 计算最近 n 个周期的 Average True Range（平均真实波幅）。
+// 用于波动率自适应的风控参数（如回撤冷却触发阈值、止盈区间）。
+//
+//	TR_i = max(High_i − Low_i, |High_i − Close_{i-1}|, |Low_i − Close_{i-1}|)
+//	ATR  = SMA(TR, n)
+//
+// 样本不足或价格异常时返回 0（调用方自行 fallback 到固定值）。
+func ATR(klines []types.KLine, n int) float64 {
+	if n <= 0 || len(klines) < n+1 {
+		return 0
+	}
+	trs := make([]float64, 0, n)
+	start := len(klines) - n
+	for i := start; i < len(klines); i++ {
+		if i <= 0 {
+			trs = append(trs, klines[i].High-klines[i].Low)
+			continue
+		}
+		prevClose := klines[i-1].Close
+		tr := math.Max(klines[i].High-klines[i].Low,
+			math.Max(math.Abs(klines[i].High-prevClose), math.Abs(klines[i].Low-prevClose)))
+		trs = append(trs, tr)
+	}
+	if len(trs) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, tr := range trs {
+		sum += tr
+	}
+	return sum / float64(len(trs))
+}
+
 // AnnualizedReturnN 计算最近 n 个交易日的年化收益率（用于双动量绝对趋势过滤，
 // 对应 Antonacci 2014 的 12-month absolute momentum）。
 //
