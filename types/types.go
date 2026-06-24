@@ -230,11 +230,16 @@ type PreOpenSnapshot struct {
 	GapPct       float64 `json:"gap_pct"`     // (auction-prevClose)/prevClose
 	EntryPrice   float64 `json:"entry_price"` // 来自 8:50 报告
 	EntryGapPct  float64 `json:"entry_gap_pct"`
-	Verdict      string  `json:"verdict"` // chase / wait_pullback / abandon / on_target
+	Verdict      string  `json:"verdict"` // chase / wait_pullback / abandon / on_target / reduce
 	AdjEntry     float64 `json:"adj_entry"`
 	AdjStopLoss  float64 `json:"adj_stop_loss"`
 	AdjTakeProf  float64 `json:"adj_take_profit"`
 	Note         string  `json:"note"`
+	// 卖出侧字段（仅 verdict==reduce 时有意义）：来自 FinalAgent.HoldReviews 的 trim/rotate 信号。
+	HoldAction   string  `json:"hold_action,omitempty"`    // keep / trim / rotate（来自 HoldReview）
+	SellRatio    float64 `json:"sell_ratio,omitempty"`     // 建议减仓比例 0~1（trim=0.5, rotate=1.0）
+	SellType     string  `json:"sell_type,omitempty"`      // open_market / limit（开盘卖 / 挂限价单）
+	AdjSellPrice float64 `json:"adj_sell_price,omitempty"` // 建议卖出价
 }
 
 // PreOpenAnalysis 9:24 PreOpenAgent 综合输出。

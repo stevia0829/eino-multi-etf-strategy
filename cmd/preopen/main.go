@@ -97,6 +97,10 @@ func main() {
 		fmt.Printf("- %s(%s) gap=%+.2f%% premium=%+.2f%% verdict=%s adj_entry=%.4f note=%s\n",
 			s.ETFName, s.ETFCode, s.GapPct*100, s.PremiumPct*100,
 			s.Verdict, s.AdjEntry, s.Note)
+		if s.Verdict == "reduce" {
+			fmt.Printf("    ↳ 减仓建议: 比例=%.0f%% 方式=%s 建议价=%.4f (hold_action=%s)\n",
+				s.SellRatio*100, s.SellType, s.AdjSellPrice, s.HoldAction)
+		}
 	}
 	if res.FinalAction != "" {
 		fmt.Println("最终建议:", res.FinalAction)

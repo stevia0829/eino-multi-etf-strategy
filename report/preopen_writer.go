@@ -91,9 +91,29 @@ func BuildPreOpenMarkdown(a *types.PreOpenAnalysis) string {
 	}
 	b.WriteString("\n")
 
+	// 减仓 / 平仓建议（仅当存在 reduce verdict 时输出）
+	if hasReduceSnapshot(a) {
+		b.WriteString("## 四、减仓 / 平仓建议 (PreOpenAgent · 卖出侧)\n\n")
+		b.WriteString("> 触发条件：持仓标的在 8:50 HoldReviews 中被标记为 trim/rotate，结合集合竞价盘口给出减仓方案。\n\n")
+		b.WriteString("| 名称 | 代码 | HoldReview | 建议比例 | 卖出方式 | 建议价 | 备注 |\n")
+		b.WriteString("|---|---|---|---|---|---|---|\n")
+		for _, s := range a.Snapshots {
+			if s.Verdict != "reduce" {
+				continue
+			}
+			price := fmt.Sprintf("%.4f", s.AdjSellPrice)
+			if s.AdjSellPrice <= 0 {
+				price = "市价"
+			}
+			b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %.0f%% | `%s` | %s | %s |\n",
+				s.ETFName, s.ETFCode, s.HoldAction, s.SellRatio*100, s.SellType, price, s.Note))
+		}
+		b.WriteString("\n")
+	}
+
 	// 综合论证
 	if a.Summary != "" {
-		b.WriteString("## 四、综合论证\n\n> ")
+		b.WriteString("## 五、综合论证\n\n> ")
 		b.WriteString(strings.ReplaceAll(a.Summary, "\n", "\n> "))
 		b.WriteString("\n\n")
 	}
@@ -105,4 +125,14 @@ func BuildPreOpenMarkdown(a *types.PreOpenAnalysis) string {
 	b.WriteString("> ⚠️ 本报告基于 9:20-9:25 集合竞价不可撤单期撮合数据，仅供研究参考；")
 	b.WriteString("溢价率 / 跳空数据存在最后 30 秒突变风险，开盘前请以场内最新报价为准。\n")
 	return b.String()
+}
+
+// hasReduceSnapshot 是否存在卖出侧 verdict=reduce 的标的（决定是否渲染「减仓/平仓建议」小节）。
+func hasReduceSnapshot(a *types.PreOpenAnalysis) bool {
+	for _, s := range a.Snapshots {
+		if s.Verdict == "reduce" {
+			return true
+		}
+	}
+	return false
 }

@@ -21,3 +21,5 @@ report/*.json
 report/strategy.py
 *.tmp
 *.swp
+.ttadk/
+specs/doc_export/
