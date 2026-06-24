@@ -160,13 +160,10 @@ func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) 
 				top[i].Indicators["IOPV"] = q.IOPV
 				top[i].Indicators["PremiumPct"] = top[i].ETF.PremiumPct
 			}
-			// ── P3-3 折溢价反向因子（仅实时模式生效，回测无溢价数据时跳过） ─────
-			// 把"过热的高溢价"反向映射到 Score 上：场内追高 → IOPV 被透支 → 回归净值的下行风险。
-			// 与 CapByPremium 的差异：CapByPremium 在 final 决策时仅做 recommendation 降档，
-			// 不会让"top1 严重溢价" 让位给"top2 折价"；P3-3 直接修正排名。
+			// ── P3-3 折溢价反向因子（仅实时模式，记录 PenaltyMult 指标供 FinalAgent 参考） ─────
+			// 注意：不再对 top 做 sortScoredDesc 重排——保证线上排名与聚宽裸分排名完全一致。
+			// applyPremiumPenalty 仅修改 Score 供下游加权参考，不改变 Screener 的排名顺序。
 			applyPremiumPenalty(top)
-			// 按修正后的 Score 重排 + 更新 Best；保持 dedupBySector 已经处理过的语义不变。
-			sortScoredDesc(top)
 		}
 	}
 
@@ -188,14 +185,15 @@ func (a *ScreenerAgent) Run(ctx context.Context) (*types.ScreenerResult, error) 
 //	100 * (1 / (1 + exp(-2.5 * score)))
 //
 // score=0 → 50；score=1 → ~92；score=-0.5 → ~22。
-// 同时引入 R² 作为置信度乘子，避免 R² 极低的伪趋势拿高分。
+//
+// 重要：sigmoid 是 score 的严格单调递增函数，因此归一化后的排名与裸分完全一致
+// （= 聚宽 get_etf_rank 的排名）。不再叠加 R² 置信度乘子——裸分本身已含 R²
+// （score = annualized × R²），二次乘入会破坏单调性、扭曲排名。
 func normalizeStrategy3Score(score, r2 float64) float64 {
 	if math.IsNaN(score) || math.IsInf(score, 0) {
 		return 0
 	}
-	base := 100.0 / (1.0 + math.Exp(-2.5*score))
-	confidence := 0.5 + 0.5*r2 // R²=0 → 0.5, R²=1 → 1.0
-	v := base * confidence
+	v := 100.0 / (1.0 + math.Exp(-2.5*score))
 	if v < 0 {
 		v = 0
 	}
