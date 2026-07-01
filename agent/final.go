@@ -271,6 +271,8 @@ func (a *FinalAgent) Run(ctx context.Context, st *types.AgentState) (*types.Fina
 	if dec.TakeProfit == 0 {
 		dec.TakeProfit = DefaultTakeProfit(target)
 	}
+	// 强制止损/止盈落在 advice 合法区间，拦截 LLM 返回的越界值（AGENTS.md §6）
+	dec.StopLoss, dec.TakeProfit = clampStopTake(target.ETF.Price, dec.StopLoss, dec.TakeProfit)
 	if capped, note := CapByPullbackCooldownForState(dec.Recommendation, target, st); note != "" {
 		dec.Recommendation = capped
 		if dec.Reasoning != "" {
@@ -544,6 +546,21 @@ func clamp(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+// clampStopTake 把止损/止盈拉回 advice 合法区间（AGENTS.md §6 硬约束）：
+//
+//	stop ∈ [price×0.88, price×0.97]，take ∈ [price×1.05, price×1.20]
+//
+// 该区间天然保证 stop < price < take。price<=0 时无法校验，原样返回。
+// 只在 LLM 返回越界值时生效；默认值（DefaultStopLoss=0.97×price、DefaultTakeProfit≥1.05×price）本就在区间内。
+func clampStopTake(price, stop, take float64) (float64, float64) {
+	if price <= 0 {
+		return stop, take
+	}
+	stop = clamp(stop, price*0.88, price*0.97)
+	take = clamp(take, price*1.05, price*1.20)
+	return stop, take
 }
 
 // RuleRecommend 把综合分映射成 recommendation。
@@ -985,7 +1002,7 @@ func buildAltPick(e types.ScoredETF, n types.NewsAnalysis, t types.TechnicalAnal
 	rec := "hold"
 	switch {
 	case e.Score >= 80:
-		rec = "buy"
+		rec = "strong_buy"
 	case e.Score >= 65:
 		rec = "buy"
 	}
@@ -1061,6 +1078,8 @@ func sanitizePicks(picks []types.FinalPick, st *types.AgentState, dec *types.Fin
 		if p.TakeProfit == 0 {
 			p.TakeProfit = DefaultTakeProfit(e)
 		}
+		// 强制止损/止盈落在 advice 合法区间，拦截 LLM 返回的越界值（AGENTS.md §6）
+		p.StopLoss, p.TakeProfit = clampStopTake(e.ETF.Price, p.StopLoss, p.TakeProfit)
 		if e.ETF.Code == dec.TargetETF.ETF.Code {
 			if p.Recommendation != dec.Recommendation {
 				p.Recommendation = dec.Recommendation

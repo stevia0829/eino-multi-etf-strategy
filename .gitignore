@@ -11,6 +11,9 @@ dist/
 
 config/secrets.json
 
+# claw/微信桥维护的实时持仓（个人仓位，不入库）
+holding.json
+
 report/etf-report-*.md
 report/preopen-report-*.md
 report/backtest-*.md

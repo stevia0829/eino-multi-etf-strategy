@@ -261,11 +261,17 @@ func (e *EastMoneyDataSource) fetchTencentKLine(code string, days int, asOf time
 			continue
 		}
 		dateStr, _ := row[0].(string)
-		t, _ := time.Parse("2006-01-02", dateStr)
+		t, errTime := time.Parse("2006-01-02", dateStr)
+		closePx := parseF(toStrAny(row[2]))
+		// 跳过日期解析失败（停牌占位 "-" / 空串）或无效收盘的脏 bar：
+		// Close=0 会让 MA/RSI 等指标算出脏值并污染回测，必须丢弃而非静默进序列。
+		if errTime != nil || closePx <= 0 {
+			continue
+		}
 		klines = append(klines, types.KLine{
 			Date:   t,
 			Open:   parseF(toStrAny(row[1])),
-			Close:  parseF(toStrAny(row[2])),
+			Close:  closePx,
 			High:   parseF(toStrAny(row[3])),
 			Low:    parseF(toStrAny(row[4])),
 			Volume: parseF(toStrAny(row[5])),
@@ -308,11 +314,16 @@ func (e *EastMoneyDataSource) fetchEastMoneyKLine(code string, days int, asOf ti
 		if len(parts) < 6 {
 			continue
 		}
-		t, _ := time.Parse("2006-01-02", parts[0])
+		t, errTime := time.Parse("2006-01-02", parts[0])
+		closePx := parseF(parts[2])
+		// 跳过日期解析失败或无效收盘的脏 bar（同腾讯源，Close=0 会污染指标与回测）。
+		if errTime != nil || closePx <= 0 {
+			continue
+		}
 		klines = append(klines, types.KLine{
 			Date:   t,
 			Open:   parseF(parts[1]),
-			Close:  parseF(parts[2]),
+			Close:  closePx,
 			High:   parseF(parts[3]),
 			Low:    parseF(parts[4]),
 			Volume: parseF(parts[5]),

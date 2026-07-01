@@ -51,9 +51,13 @@ func NewPipeline(cfg *config.Config) (*Pipeline, error) {
 	}, nil
 }
 
-// staticFallback：当所有 LLM 都不可达时的最后保护层 —— 直接返回空 JSON，让上层走规则兜底。
+// staticFallback：当所有 LLM 都不可达时的最后保护层 —— 返回空串。
+// 空串会让 callLLMJSON 的 json.Unmarshal 失败（返回 err），从而触发各 agent 的 err 分支走规则兜底
+// （final→ruleBasedFinal / news→ruleBasedNewsFromItems / global→ruleBasedGlobalFromQuotes / tech→规则版）。
+// 注意：若返回 "{}"，Unmarshal 会成功（err=nil），规则兜底不触发，且 onRaw 会把 "{}" 写进
+// FinalDecision.Reasoning 等字段（显示成 "{}"）。故这里必须返回非 JSON 的空串。
 func staticFallback(system, user string) string {
-	return "{}"
+	return ""
 }
 
 // Run 模拟 eino compose.Graph 的多 agent 编排：

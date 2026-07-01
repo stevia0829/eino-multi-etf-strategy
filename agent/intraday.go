@@ -28,7 +28,7 @@ import (
 // 完全规则驱动（不调 LLM），延迟 < 2 秒，适合盘中反复刷新。
 type IntradayWatchAgent struct {
 	DS   datasource.ETFDataSource
-	RQ   datasource.RealtimeQuoter     // 实时报价器（通常 = DS 的类型断言）
+	RQ   datasource.RealtimeQuoter // 实时报价器（通常 = DS 的类型断言）
 	Conf types.IntradayWatchConfig
 }
 
@@ -84,11 +84,11 @@ func (a *IntradayWatchAgent) Run(ctx context.Context) (*types.IntradayAnalysis, 
 	summary := a.buildSummary(market, snapshots, urgentCount)
 
 	return &types.IntradayAnalysis{
-		GeneratedAt:  time.Now(),
-		MarketIndex:  market,
-		Snapshots:    snapshots,
-		UrgentCount:  urgentCount,
-		Summary:      summary,
+		GeneratedAt: time.Now(),
+		MarketIndex: market,
+		Snapshots:   snapshots,
+		UrgentCount: urgentCount,
+		Summary:     summary,
 	}, nil
 }
 
@@ -186,11 +186,12 @@ func (a *IntradayWatchAgent) snapshot(
 		s.RecentTrend = recentTrend(klines)
 	}
 
-	// 报告关键价位（从 FinalDecision 或 Top5 提取）
+	// 报告关键价位（优先集合竞价修正价，回退 8:50 早报原价）
 	entry, stop, tp := a.reportLevels(code)
 	s.EntryPrice = entry
 	s.StopLoss = stop
 	s.TakeProfit = tp
+	s.PreOpenVerdict = a.preOpenVerdict(code)
 	if entry > 0 {
 		s.DistToEntry = (s.Price - entry) / entry
 	}
@@ -201,26 +202,113 @@ func (a *IntradayWatchAgent) snapshot(
 		s.DistToTP = (s.Price - tp) / tp
 	}
 
+	// 与历次盯盘对比：取该 code 在最近 N 次快照里的价格序列（老→新），算 Δ 与跨刷新趋势
+	if len(a.Conf.PrevIntradays) > 0 {
+		var series []float64
+		for _, pa := range a.Conf.PrevIntradays { // 已按老→新排序
+			if pa == nil {
+				continue
+			}
+			for _, p := range pa.Snapshots {
+				if p.ETFCode == code && p.Price > 0 {
+					series = append(series, p.Price)
+					break
+				}
+			}
+		}
+		if len(series) > 0 {
+			s.PrevPrice = series[len(series)-1] // 最近一次
+			if s.Price > 0 {
+				s.PriceDelta = (s.Price - s.PrevPrice) / s.PrevPrice
+				series = append(series, s.Price) // 追加当前价，参与趋势判定
+			}
+			s.PrevTrend = intradayTrend(series)
+		}
+	}
+
 	// 判定
 	a.judge(&s)
+	// 有上次盯盘价时，把 Δ + 跨刷新趋势追加进 rationale（不改信号，只增语境）
+	if s.PrevPrice > 0 {
+		extra := fmt.Sprintf("距上次盯盘 %+.2f%%", s.PriceDelta*100)
+		if s.PrevTrend != "" {
+			extra += "，" + s.PrevTrend
+		}
+		s.Rationale = fmt.Sprintf("%s %s。", s.Rationale, extra)
+	}
 	return s
 }
 
-// reportLevels 从今日报告提取入场/止损/止盈价。
-func (a *IntradayWatchAgent) reportLevels(code string) (entry, stop, tp float64) {
-	if a.Conf.FinalDecision != nil {
-		// TargetETF
-		if a.Conf.FinalDecision.TargetETF.ETF.Code == code {
-			return a.Conf.FinalDecision.EntryPrice, a.Conf.FinalDecision.StopLoss, a.Conf.FinalDecision.TakeProfit
+// intradayTrend 给定某 code 的历次盯盘价（老→新，含当前价），返回简短趋势标签。
+// 至少 3 个有效点才判定（避免两点误判）；单调下行=连跌，单调上行=连涨，其余=震荡。
+func intradayTrend(prices []float64) string {
+	if len(prices) < 3 {
+		return ""
+	}
+	down := 0
+	for i := 1; i < len(prices); i++ {
+		if prices[i] < prices[i-1] {
+			down++
 		}
-		// Picks
+	}
+	steps := len(prices) - 1
+	switch {
+	case down >= steps:
+		return fmt.Sprintf("近%d次连跌", len(prices))
+	case down == 0:
+		return fmt.Sprintf("近%d次连涨", len(prices))
+	default:
+		return fmt.Sprintf("近%d次震荡", len(prices))
+	}
+}
+
+// reportLevels 从今日报告提取入场/止损/止盈价。
+// 优先级：9:24 集合竞价复核 (Conf.PreOpen) 的修正价位 > 8:50 早报 (FinalDecision) 原价。
+// preopen 的 adj_entry=0 表示"等回踩/不追"，此时回退到早报原入场价作为盯盘参考线。
+func (a *IntradayWatchAgent) reportLevels(code string) (entry, stop, tp float64) {
+	// 基线：8:50 早报
+	if a.Conf.FinalDecision != nil {
+		if a.Conf.FinalDecision.TargetETF.ETF.Code == code {
+			entry, stop, tp = a.Conf.FinalDecision.EntryPrice, a.Conf.FinalDecision.StopLoss, a.Conf.FinalDecision.TakeProfit
+		}
 		for _, p := range a.Conf.FinalDecision.Picks {
 			if p.ETFCode == code {
-				return p.EntryPrice, p.StopLoss, p.TakeProfit
+				entry, stop, tp = p.EntryPrice, p.StopLoss, p.TakeProfit
 			}
 		}
 	}
-	return 0, 0, 0
+	// 覆盖：集合竞价撮合修正后的价位（更贴近当日开盘现实，仅 >0 才覆盖）
+	if a.Conf.PreOpen != nil {
+		for _, ps := range a.Conf.PreOpen.Snapshots {
+			if ps.ETFCode != code {
+				continue
+			}
+			if ps.AdjEntry > 0 {
+				entry = ps.AdjEntry
+			}
+			if ps.AdjStopLoss > 0 {
+				stop = ps.AdjStopLoss
+			}
+			if ps.AdjTakeProf > 0 {
+				tp = ps.AdjTakeProf
+			}
+			break
+		}
+	}
+	return entry, stop, tp
+}
+
+// preOpenVerdict 取该标的在 9:24 集合竞价复核中的结论（仅作展示参考，不覆盖盘中实时信号）。
+func (a *IntradayWatchAgent) preOpenVerdict(code string) string {
+	if a.Conf.PreOpen == nil {
+		return ""
+	}
+	for _, ps := range a.Conf.PreOpen.Snapshots {
+		if ps.ETFCode == code {
+			return ps.Verdict
+		}
+	}
+	return ""
 }
 
 // judge 核心判定逻辑——纯规则，根据快照数据生成 Signal / Priority / Rationale。
@@ -372,21 +460,17 @@ func (a *IntradayWatchAgent) judgeBuy(s *types.IntradaySnapshot) {
 		return
 	}
 
-	// 4. 已高于入场价 → chase_now
+	// 4. 已高于入场价 > 2% → chase_now（追涨成本增加）
+	//    注：dist ∈ (0, 0.02] 已在上方 pullback_entry 分支并入"可入场"区间，故此处只处理 > 2%。
 	if dist > 0.02 {
 		s.Signal = "chase_now"
 		s.SignalCn = fmt.Sprintf("已高于入场价 %.1f%%，追涨需谨慎", dist*100)
 		s.Priority = "watch"
-		// 如果才高不到 2%，可以追
-		if dist <= 0.02 {
-			s.SignalCn = fmt.Sprintf("略高于入场价 %.1f%%，可接受追入", dist*100)
-			s.Priority = "info"
-		}
 		s.Rationale = fmt.Sprintf("当前价高于入场价 %.3f，追涨成本增加。涨幅 %.1f%%。", entry, dist*100)
 		return
 	}
 
-	// 5. 默认：等待
+	// 5. 兜底（理论不可达：dist 取值已被上方四个区间完整覆盖；保留以防新增区间时漏判）
 	s.Signal = "wait"
 	s.SignalCn = "继续等待入场时机"
 	s.Priority = "info"
@@ -503,6 +587,20 @@ func FormatIntradayCLI(a *types.IntradayAnalysis) string {
 		if s.EntryPrice > 0 {
 			b.WriteString(fmt.Sprintf("   入场 %.3f(距入场 %+.2f%%)  止损 %.3f(距止损 %+.2f%%)  止盈 %.3f\n",
 				s.EntryPrice, s.DistToEntry*100, s.StopLoss, s.DistToStop*100, s.TakeProfit))
+		}
+		// 跨报告上下文：集合竞价复核结论 + 距上次盯盘涨跌 + 跨刷新趋势
+		var chips []string
+		if s.PreOpenVerdict != "" {
+			chips = append(chips, "竞价:"+s.PreOpenVerdict)
+		}
+		if s.PrevPrice > 0 {
+			chips = append(chips, fmt.Sprintf("距上次盯盘 %+.2f%%", s.PriceDelta*100))
+		}
+		if s.PrevTrend != "" {
+			chips = append(chips, s.PrevTrend)
+		}
+		if len(chips) > 0 {
+			b.WriteString(fmt.Sprintf("   [%s]\n", strings.Join(chips, " | ")))
 		}
 		b.WriteString(fmt.Sprintf("   → %s [%s] %s\n\n", s.SignalCn, s.Priority, s.Rationale))
 	}

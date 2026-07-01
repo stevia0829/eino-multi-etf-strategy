@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,11 @@ func SavePreOpen(dir string, a *types.PreOpenAnalysis) (string, error) {
 	path := filepath.Join(dir, filename)
 	if err := os.WriteFile(path, []byte(BuildPreOpenMarkdown(a)), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	// 同步落 JSON sidecar，供盘中 IntradayWatchAgent 直接读取集合竞价修正后的 adj_entry/stop/take。
+	jsonPath := filepath.Join(dir, fmt.Sprintf("preopen-report-%s.json", now.Format("20060102-150405")))
+	if buf, err := json.MarshalIndent(a, "", "  "); err == nil {
+		_ = os.WriteFile(jsonPath, buf, 0o644)
 	}
 	abs, _ := filepath.Abs(path)
 	return abs, nil

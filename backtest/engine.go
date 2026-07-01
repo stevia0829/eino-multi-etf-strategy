@@ -109,6 +109,14 @@ type Engine struct {
 	CostPerSide float64
 	// Benchmark 基准 ETF 代码，默认 510300（沪深300ETF），用于 buy&hold 对比 + Alpha。
 	Benchmark string
+	// EntryNextOpen 入场时机开关（消除前视偏差）：
+	//   false（默认）= 信号日收盘价入场（历史行为，保留以复现旧回测）；
+	//   true         = 次日开盘价入场（信号 T 日收盘产生 → T+1 开盘执行，无 lookahead）。
+	// 机理：GetKLineAsOf 的 asOf 含当日，Screener/Rotation 在 AsOf=d 时已看到 d 的收盘；
+	//       若又用 indexOnOrAfter(d).Close 入场，等于"看了今日收盘才在今日收盘买入"。
+	// 开关开时改用 indexAfter(d).Open；末日（最后样本）不开新仓，因其次日开盘已落在回测窗外、
+	// 同迭代 force-exit 会在入场前平仓。force-exit 本身不动（只对末日之前入场的仓位生效，时序自洽）。
+	EntryNextOpen bool
 }
 
 func NewEngine(ds datasource.ETFDataSource) *Engine {
@@ -417,12 +425,8 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 			if kerr != nil || len(klines) == 0 {
 				continue
 			}
-			entryIdx := indexOnOrAfter(klines, d)
-			if entryIdx < 0 {
-				continue
-			}
-			entryPx := klines[entryIdx].Close
-			if entryPx <= 0 {
+			entryIdx, entryPx := e.entryIndexPrice(klines, d, di == len(dates)-1)
+			if entryIdx < 0 || entryPx <= 0 {
 				continue
 			}
 			hold = &holdState{
@@ -566,12 +570,8 @@ func (e *Engine) Run(ctx context.Context, start, end time.Time, step int) (*Resu
 			if kerr != nil || len(klines) == 0 {
 				continue
 			}
-			entryIdx := indexOnOrAfter(klines, d)
-			if entryIdx < 0 {
-				continue
-			}
-			entryPx := klines[entryIdx].Close
-			if entryPx <= 0 {
+			entryIdx, entryPx := e.entryIndexPrice(klines, d, di == len(dates)-1)
+			if entryIdx < 0 || entryPx <= 0 {
 				continue
 			}
 			hold = &holdState{
@@ -689,6 +689,42 @@ func indexOnOrAfter(klines []types.KLine, asOf time.Time) int {
 		}
 	}
 	return -1
+}
+
+// indexAfter 返回 K 线序列中第一根 Date 严格 > asOf 的索引；找不到返回 -1。
+// 用于 EntryNextOpen：信号在 asOf 当日收盘产生，次日（严格 > asOf 的第一根）开盘执行。
+func indexAfter(klines []types.KLine, asOf time.Time) int {
+	for i, k := range klines {
+		if k.Date.After(asOf) && !sameDay(k.Date, asOf) {
+			return i
+		}
+	}
+	return -1
+}
+
+// entryIndexPrice 按 EntryNextOpen 决定入场 K 线索引与执行价。
+//
+//	EntryNextOpen=false：indexOnOrAfter(d) 当日收盘（历史行为）；
+//	EntryNextOpen=true ：indexAfter(d) 次日开盘；末日（isLastSample）不开仓返回 -1，
+//	                     因其次日开盘落在回测窗外、同迭代 force-exit 会在入场前平仓。
+//
+// 找不到合适 K 线或价格无效时返回 (-1, 0)。
+func (e *Engine) entryIndexPrice(klines []types.KLine, d time.Time, isLastSample bool) (int, float64) {
+	if e.EntryNextOpen {
+		if isLastSample {
+			return -1, 0
+		}
+		idx := indexAfter(klines, d)
+		if idx < 0 {
+			return -1, 0
+		}
+		return idx, klines[idx].Open
+	}
+	idx := indexOnOrAfter(klines, d)
+	if idx < 0 {
+		return -1, 0
+	}
+	return idx, klines[idx].Close
 }
 
 func sameDay(a, b time.Time) bool {
@@ -1084,6 +1120,57 @@ func writeBucketCompare(b *strings.Builder, av, bv map[string]Bucket) {
 }
 
 // BuildOptCompareMarkdown 对比 v3（基线）与 v3opt（多窗口动量 + 分位数入场阈值）的回测结果。
+// BuildLookaheadCompareMarkdown 对比"信号日收盘价入场（现状，含前视偏差）" vs
+// "次日开盘价入场（EntryNextOpen，无前视）"，量化前视偏差对回测指标的高估程度。
+// close = EntryNextOpen=false（现状），nextOpen = EntryNextOpen=true。
+func BuildLookaheadCompareMarkdown(close, nextOpen *Result) string {
+	var b strings.Builder
+	b.WriteString("# 回测对比：入场时机（前视偏差 A/B）\n\n")
+	b.WriteString(fmt.Sprintf("- 回测区间: **%s ~ %s**\n",
+		close.StartDate.Format("2006-01-02"), close.EndDate.Format("2006-01-02")))
+	b.WriteString(fmt.Sprintf("- 基准: `%s` (buy & hold %+.2f%%)\n\n",
+		defaultStr(close.BenchmarkCode, "510300"), close.BenchmarkReturn*100))
+	b.WriteString("> **A = 信号日收盘价入场**（历史行为，含前视偏差：用了当日收盘这个事后价）\n")
+	b.WriteString("> **B = 次日开盘价入场**（EntryNextOpen，无前视，更贴近真实可执行）\n")
+	b.WriteString("> 预期 B 的收益/Sharpe 通常低于 A；B 与 A 的差距 ≈ 前视偏差的高估幅度。\n\n")
+
+	b.WriteString("## 一、整体对比\n\n")
+	b.WriteString("| 指标 | A 信号日收盘 | B 次日开盘 | Δ(B-A) |\n|---|---|---|---|\n")
+	row := func(label string, av, bv float64, fmtPct bool) {
+		var sa, sb, sd string
+		if fmtPct {
+			sa, sb = fmt.Sprintf("%.2f%%", av*100), fmt.Sprintf("%.2f%%", bv*100)
+			sd = fmt.Sprintf("%+.2f pp", (bv-av)*100)
+		} else {
+			sa, sb = fmtFinite(av), fmtFinite(bv)
+			sd = fmt.Sprintf("%+.2f", bv-av)
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", label, sa, sb, sd))
+	}
+	rowInt := func(label string, av, bv int) {
+		b.WriteString(fmt.Sprintf("| %s | %d | %d | %+d |\n", label, av, bv, bv-av))
+	}
+	rowInt("实际建仓数", close.Wins+close.Losses, nextOpen.Wins+nextOpen.Losses)
+	row("胜率", close.WinRate, nextOpen.WinRate, true)
+	row("平均加权收益", close.AvgReturn, nextOpen.AvgReturn, true)
+	row("简易 Sharpe", close.Sharpe, nextOpen.Sharpe, false)
+	row("累计净收益", close.TotalReturn, nextOpen.TotalReturn, true)
+	row("年化收益", close.AnnualReturn, nextOpen.AnnualReturn, true)
+	row("最大回撤", close.MaxDrawdown, nextOpen.MaxDrawdown, true)
+	row("Calmar", close.Calmar, nextOpen.Calmar, false)
+	row("Alpha vs 基准", close.Alpha, nextOpen.Alpha, true)
+
+	b.WriteString("\n## 二、按宏观环境分桶对比\n\n")
+	writeBucketCompareLabeled(&b, close.ByRegime, nextOpen.ByRegime, "A收盘", "B次日开盘")
+	b.WriteString("\n## 三、按板块分桶对比\n\n")
+	writeBucketCompareLabeled(&b, close.BySector, nextOpen.BySector, "A收盘", "B次日开盘")
+
+	b.WriteString("\n---\n")
+	b.WriteString("> ⚠️ 若 B（无前视）的 Sharpe/Calmar 仍显著为正且回撤可控，说明策略在可执行口径下依然有效；\n")
+	b.WriteString("> 若 B 大幅劣化，则历史回测收益有相当部分来自前视偏差，需对 A 的结论打折扣。\n")
+	return b.String()
+}
+
 func BuildOptCompareMarkdown(v3, v3opt *Result) string {
 	var b strings.Builder
 	b.WriteString("# 回测对比：v3 基线 vs v3opt（P0+P1 优化）\n\n")

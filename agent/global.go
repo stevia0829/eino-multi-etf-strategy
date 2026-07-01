@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -162,8 +163,10 @@ func snapshotNote(q datasource.IndexQuote) string {
 	}
 }
 
+// round2 保留两位小数。用 math.Round 而非 int(v*100+0.5)，后者对负数会向 +∞ 偏移
+// （如 -1.235 会得 -1.23 而非正确的 -1.24），污染下跌日海外指数的涨跌幅显示。
 func round2(v float64) float64 {
-	return float64(int(v*100+0.5)) / 100
+	return math.Round(v*100) / 100
 }
 
 // ruleBasedGlobalFromQuotes 在 LLM 失败时，用真实指数数据做规则推断（而不是塞"数据缺失"占位）。
